@@ -102,3 +102,27 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14
 .save-status{font-size:13px;font-weight:500;white-space:nowrap}
 .save-status.success{color:var(--success)}
 .save-status.error  {color:var(--danger)}
+
+/* ── Token edit button (text) ── */
+.input-action-text {
+  font-size: 14px;
+  right: 36px;
+  width: auto;
+  padding: 0 4px;
+}
+
+/* ── Language select ── */
+.input-wrap-select { }
+.input-select {
+  padding-left: 12px !important;
+  cursor: pointer;
+  appearance: auto;
+}
+
+/* ── Save button disabled state ── */
+#btn-save:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none !important;
+  pointer-events: none;
+}

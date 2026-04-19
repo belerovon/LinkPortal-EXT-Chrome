@@ -132,3 +132,17 @@ body{width:400px;min-height:200px;max-height:580px;background:var(--bg);color:va
   padding:40px 24px;gap:8px;color:var(--text-muted);font-size:13px;text-align:center}
 .empty-icon{font-size:32px}
 mark{background:rgba(78,127,242,0.25);color:var(--accent);border-radius:2px;padding:0 1px}
+
+/* ── Language selector in popup header ── */
+.lang-select {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  padding: 3px 5px;
+  cursor: pointer;
+  outline: none;
+  height: 28px;
+}
+.lang-select:hover { border-color: var(--accent); }

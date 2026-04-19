@@ -1,85 +1,97 @@
-/* ═══════════════════════════════════════════════
-   LinkPortal Chrome Extension — popup.js
-   ═══════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════
+   LinkPortal Extension — popup.js  v1.3
+   Basic Auth · i18n · Cache-first
+   ═══════════════════════════════════════════ */
 
 const MAX_INACTIVE_DAYS = 30;
 
 let state = {
-  baseUrl: '', token: '', username: '',
+  baseUrl: '', token: '', username: '', lang: 'de',
   tabs: [], sections: {}, links: {},
   activeTab: null, allLinks: [], fromCache: false,
 };
 
 const $ = id => document.getElementById(id);
 
-// ── Show Screen ──
-function showScreen(name) {
-  ['setup','loading','error','main','logout'].forEach(n =>
-    $(`screen-${n}`).style.display = 'none'
-  );
-  $(`screen-${name}`).style.display = 'flex';
+// ── Apply language to UI ──
+function applyLang() {
+  $('search-input').placeholder  = t('search_placeholder');
+  $('loading-text').textContent  = t('loading');
+  $('setup-title').textContent   = t('setup_title');
+  $('setup-desc').textContent    = t('setup_desc');
+  $('btn-open-settings').textContent = t('setup_btn');
+  $('btn-logout-settings').textContent = t('logout_btn');
+  $('error-title').textContent   = t('error_title');
+  $('btn-retry').textContent     = t('retry');
+  $('lang-select').value         = _lang;
+  $('btn-refresh').title         = t('refresh');
+  $('btn-settings').title        = t('settings');
 }
 
-// ── Logout: clear credentials ──
+function showScreen(name) {
+  ['setup','loading','error','main','logout'].forEach(n =>
+    $('screen-' + n).style.display = 'none');
+  $('screen-' + name).style.display = 'flex';
+}
+
 async function doLogout(reason) {
   await chrome.storage.local.clear();
   await chrome.storage.sync.remove(['token', 'username']);
-
-  const icon  = $('logout-icon');
-  const title = $('logout-title');
-  const desc  = $('logout-desc');
-
+  const icon = $('logout-icon'), title = $('logout-title'), desc = $('logout-desc');
   if (reason === '403') {
-    icon.textContent  = '🚫';
-    title.textContent = 'Zugriff verweigert';
-    desc.textContent  = 'Dein API-Token ist ungültig oder wurde widerrufen. Bitte generiere einen neuen Token im LinkPortal.';
-  } else if (reason === 'expired') {
-    icon.textContent  = '⏰';
-    title.textContent = 'Automatisch abgemeldet';
-    desc.textContent  = `Du wurdest nach ${MAX_INACTIVE_DAYS} Tagen ohne Sync automatisch abgemeldet. Bitte konfiguriere die Extension neu.`;
+    icon.textContent = t('logout_403_icon');
+    title.textContent = t('logout_403_title');
+    desc.textContent  = t('logout_403_desc');
   } else {
-    icon.textContent  = '🔒';
-    title.textContent = 'Session abgelaufen';
-    desc.textContent  = 'Bitte konfiguriere die Extension neu.';
+    icon.textContent = t('logout_exp_icon');
+    title.textContent = t('logout_exp_title');
+    desc.textContent  = t('logout_exp_desc');
   }
   showScreen('logout');
 }
 
-// ── Load Portal Logo ──
-async function loadPortalLogo(baseUrl) {
-  if (!baseUrl) return;
-  const base = baseUrl.replace(/\/$/, '');
-  const logoEl   = $('portal-logo');
-  const defaultEl= $('default-icon');
+// ── Basic Auth ──
+function makeAuth(username, token) {
+  return 'Basic ' + btoa(unescape(encodeURIComponent(username + ':' + token)));
+}
 
-  // Try SVG first, then PNG
-  for (const ext of ['svg', 'png']) {
+async function apiGet(path) {
+  const res = await fetch(
+    state.baseUrl.replace(/\/$/, '') + '/api' + path,
+    { headers: { 'Authorization': makeAuth(state.username, state.token) } }
+  );
+  if (res.status === 403) throw Object.assign(new Error('403'), { status: 403 });
+  if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + res.statusText);
+  return res.json();
+}
+
+// ── Load portal logo ──
+async function loadPortalLogo() {
+  const base = state.baseUrl.replace(/\/$/, '');
+  const logoEl = $('portal-logo'), defEl = $('default-icon');
+  for (const ext of ['svg','png']) {
     try {
-      const url = `${base}/img/logo.${ext}`;
-      const res = await fetch(url, { mode: 'cors' });
+      const res = await fetch(base + '/img/logo.' + ext, { mode: 'cors' });
       if (res.ok) {
-        logoEl.src = url;
+        logoEl.src = base + '/img/logo.' + ext;
         logoEl.style.display = '';
-        defaultEl.style.display = 'none';
-
-        // Also set as Chrome extension icon dynamically
+        defEl.style.display = 'none';
         if (ext === 'png') {
           const img = new Image();
           img.crossOrigin = 'anonymous';
           img.onload = () => {
             try {
-              const sizes = [16, 48];
-              const iconData = {};
-              for (const sz of sizes) {
+              const d = {};
+              for (const sz of [16,48]) {
                 const c = document.createElement('canvas');
                 c.width = c.height = sz;
                 c.getContext('2d').drawImage(img, 0, 0, sz, sz);
-                iconData[sz] = c.getContext('2d').getImageData(0, 0, sz, sz);
+                d[sz] = c.getContext('2d').getImageData(0, 0, sz, sz);
               }
-              chrome.action.setIcon({ imageData: iconData }).catch(() => {});
+              chrome.action.setIcon({ imageData: d }).catch(() => {});
             } catch {}
           };
-          img.src = url;
+          img.src = base + '/img/logo.png';
         }
         return;
       }
@@ -87,149 +99,106 @@ async function loadPortalLogo(baseUrl) {
   }
 }
 
-// ── API ──
-async function apiGet(path) {
-  const res = await fetch(
-    state.baseUrl.replace(/\/$/, '') + '/api' + path,
-    { headers: { 'Authorization': `Bearer ${state.token}` } }
-  );
-  if (res.status === 403) throw Object.assign(new Error('403 Forbidden'), { status: 403 });
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-  return res.json();
+// ── Fetch language from portal ──
+async function fetchPortalLang() {
+  try {
+    const me = await apiGet('/auth/me');
+    if (me.language && I18N[me.language]) {
+      await chrome.storage.local.set({ lang: me.language });
+      return me.language;
+    }
+  } catch {}
+  return null;
 }
 
-// ── Fetch from API ──
+// ── Fetch all data ──
 async function fetchFromApi() {
-  $('loading-text').textContent = 'Tabs werden geladen…';
+  $('loading-text').textContent = t('loading');
   const tabs = await apiGet('/tabs');
   const sections = {}, links = {};
-
   for (let i = 0; i < tabs.length; i++) {
     const tab = tabs[i];
-    $('loading-text').textContent = `Lade Tab „${tab.title}"… (${i+1}/${tabs.length})`;
-    const secs = await apiGet(`/tabs/${tab.id}/sections`);
+    $('loading-text').textContent = t('loading_tab') + ' "' + tab.title + '"… (' + (i+1) + '/' + tabs.length + ')';
+    const secs = await apiGet('/tabs/' + tab.id + '/sections');
     sections[tab.id] = secs;
     for (const sec of secs) {
-      try {
-        const lnks = await apiGet(`/sections/${sec.id}/links`);
-        links[sec.id] = lnks;
-      } catch (e) {
-        if (e.status === 403) throw e;
-        links[sec.id] = [];
-      }
+      try { links[sec.id] = await apiGet('/sections/' + sec.id + '/links'); }
+      catch (e) { if (e.status === 403) throw e; links[sec.id] = []; }
     }
   }
-
   const data = { tabs, sections, links, syncTime: Date.now() };
   await chrome.storage.local.set({ cache: data, cacheTime: Date.now() });
   return data;
 }
 
-// ── Load from cache ──
-async function loadFromCache() {
-  const { cache } = await chrome.storage.local.get(['cache']);
-  return cache || null;
-}
-
-// ── Apply data to state ──
-function applyData(data, fromCache) {
+function applyData(data) {
   state.tabs = data.tabs || [];
   state.sections = data.sections || {};
   state.links = data.links || {};
-  state.fromCache = fromCache;
   state.allLinks = [];
-  for (const tab of state.tabs) {
-    for (const sec of (state.sections[tab.id] || [])) {
-      for (const link of (state.links[sec.id] || [])) {
-        state.allLinks.push({
-          ...link, tabTitle: tab.title, tabIcon: tab.icon,
-          tabId: tab.id, sectionTitle: sec.title, sectionIcon: sec.icon,
-        });
-      }
-    }
-  }
+  for (const tab of state.tabs)
+    for (const sec of (state.sections[tab.id] || []))
+      for (const link of (state.links[sec.id] || []))
+        state.allLinks.push({ ...link, tabTitle: tab.title, tabIcon: tab.icon, tabId: tab.id,
+          sectionTitle: sec.title, sectionIcon: sec.icon });
 }
 
-// ── Check 30-day expiry ──
-async function check30DayExpiry() {
-  const { cacheTime } = await chrome.storage.local.get(['cacheTime']);
-  if (!cacheTime) return false;
-  const days = (Date.now() - cacheTime) / (1000 * 60 * 60 * 24);
-  return days >= MAX_INACTIVE_DAYS;
-}
-
-// ── Main Load ──
-async function loadData(forceRefresh = false) {
+async function loadData(force = false) {
   showScreen('loading');
   $('cache-badge').style.display = 'none';
 
-  // Check expiry before anything
-  if (!forceRefresh && await check30DayExpiry()) {
-    await doLogout('expired');
-    return;
+  // 30-day expiry
+  if (!force) {
+    const { cacheTime } = await chrome.storage.local.get(['cacheTime']);
+    if (cacheTime && (Date.now() - cacheTime) / 86400000 >= MAX_INACTIVE_DAYS) {
+      await doLogout('expired'); return;
+    }
   }
 
   try {
-    if (!forceRefresh) {
-      const cached = await loadFromCache();
-      if (cached) {
-        applyData(cached, true);
-        renderAll();
-        showScreen('main');
+    if (!force) {
+      const { cache } = await chrome.storage.local.get(['cache']);
+      if (cache) {
+        applyData(cache);
+        renderAll(); showScreen('main');
         $('cache-badge').style.display = '';
-        $('cache-badge').title = `Cache vom ${new Date(cached.syncTime).toLocaleString('de')}`;
-        refreshBackground(); // silent refresh
-        return;
+        $('cache-badge').title = t('cache_from') + ' ' + new Date(cache.syncTime).toLocaleString();
+        bgRefresh(); return;
       }
     }
-    const data = await fetchFromApi();
-    applyData(data, false);
-    renderAll();
-    showScreen('main');
+    applyData(await fetchFromApi());
+    renderAll(); showScreen('main');
   } catch (err) {
-    if (err.status === 403 || err.message.includes('403')) {
-      await doLogout('403');
-      return;
-    }
-    // Fallback to cache on error
-    const cached = await loadFromCache();
-    if (cached) {
-      applyData(cached, true);
-      renderAll();
-      showScreen('main');
+    if (err.status === 403) { await doLogout('403'); return; }
+    const { cache } = await chrome.storage.local.get(['cache']);
+    if (cache) {
+      applyData(cache); renderAll(); showScreen('main');
       $('cache-badge').style.display = '';
-      $('cache-badge').title = `⚠ Offline – Cache vom ${new Date(cached.syncTime).toLocaleString('de')}`;
+      $('cache-badge').title = t('cache_offline') + ' ' + new Date(cache.syncTime).toLocaleString();
     } else {
-      $('error-message').textContent = err.message;
-      showScreen('error');
+      $('error-message').textContent = err.message; showScreen('error');
     }
   }
 }
 
-// ── Silent background refresh ──
-async function refreshBackground() {
+async function bgRefresh() {
   try {
-    const data = await fetchFromApi();
-    applyData(data, false);
+    applyData(await fetchFromApi());
     $('cache-badge').style.display = 'none';
     if (state.activeTab) renderTabContent(state.activeTab);
-  } catch (e) {
-    if (e.status === 403) await doLogout('403');
-  }
+  } catch (e) { if (e.status === 403) await doLogout('403'); }
 }
 
 // ── Render ──
 function renderAll() {
   if (!state.tabs.length) {
     $('tabs-nav').innerHTML = '';
-    $('tab-content').innerHTML = `<div class="empty-tab"><div class="empty-icon">🔒</div><p>Keine Tabs verfügbar.</p></div>`;
+    $('tab-content').innerHTML = '<div class="empty-tab"><div class="empty-icon">🔒</div><p>' + t('no_tabs') + '</p></div>';
     return;
   }
-  if (!state.activeTab || !state.tabs.find(t => t.id === state.activeTab)) {
+  if (!state.activeTab || !state.tabs.find(t2 => t2.id === state.activeTab))
     state.activeTab = state.tabs[0].id;
-  }
-  renderTabs();
-  renderTabContent(state.activeTab);
+  renderTabs(); renderTabContent(state.activeTab);
 }
 
 function renderTabs() {
@@ -238,13 +207,12 @@ function renderTabs() {
   for (const tab of state.tabs) {
     const btn = document.createElement('button');
     btn.className = 'tab-btn' + (tab.id === state.activeTab ? ' active' : '');
-    btn.innerHTML = `${tab.icon ? `<span class="tab-icon">${tab.icon}</span>` : ''}<span>${escHtml(tab.title)}</span>`;
+    btn.innerHTML = (tab.icon ? '<span class="tab-icon">' + tab.icon + '</span>' : '') + '<span>' + esc(tab.title) + '</span>';
     btn.addEventListener('click', () => {
       state.activeTab = tab.id;
       nav.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      clearSearch();
-      renderTabContent(tab.id);
+      clearSearch(); renderTabContent(tab.id);
     });
     nav.appendChild(btn);
   }
@@ -253,183 +221,177 @@ function renderTabs() {
 function renderTabContent(tabId) {
   const content = $('tab-content');
   const secs = state.sections[tabId] || [];
-  let html = '', hasLinks = false;
-
+  let html = '', has = false;
   for (let i = 0; i < secs.length; i++) {
-    const sec = secs[i];
-    const lnks = state.links[sec.id] || [];
+    const sec = secs[i], lnks = state.links[sec.id] || [];
     if (!lnks.length) continue;
-    hasLinks = true;
-    if (i > 0) html += `<div class="section-divider"></div>`;
-    html += `
-      <div class="section-block">
-        <div class="section-header">
-          ${sec.icon ? `<span class="section-icon">${sec.icon}</span>` : ''}
-          <span class="section-title">${escHtml(sec.title)}</span>
-          <span class="section-count">${lnks.length}</span>
-        </div>
-        ${lnks.map(l => renderLinkItem(l)).join('')}
-      </div>`;
+    has = true;
+    if (i > 0) html += '<div class="section-divider"></div>';
+    html += '<div class="section-block"><div class="section-header">' +
+      (sec.icon ? '<span class="section-icon">' + sec.icon + '</span>' : '') +
+      '<span class="section-title">' + esc(sec.title) + '</span>' +
+      '<span class="section-count">' + lnks.length + '</span></div>' +
+      lnks.map(l => linkHtml(l)).join('') + '</div>';
   }
-
-  content.innerHTML = hasLinks
-    ? html
-    : `<div class="empty-tab"><div class="empty-icon">📭</div><p>Keine Links in diesem Tab.</p></div>`;
-  attachLinkListeners(content);
+  content.innerHTML = has ? html :
+    '<div class="empty-tab"><div class="empty-icon">📭</div><p>' + t('no_links') + '</p></div>';
+  bindLinks(content);
 }
 
-function renderLinkItem(link, highlight = '') {
-  const title = highlight ? highlightText(link.title || '', highlight) : escHtml(link.title || '');
-  const desc  = highlight ? highlightText(link.description || '', highlight) : escHtml(link.description || '');
-  return `
-    <a class="link-item" data-url="${escHtml(link.url)}" href="#">
-      ${buildFaviconHtml(link)}
-      <div class="link-info">
-        <div class="link-title">${title}</div>
-        ${link.description ? `<div class="link-desc">${desc}</div>` : ''}
-      </div>
-      <button class="link-open-btn" title="In neuem Tab öffnen">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-          <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-        </svg>
-      </button>
-    </a>`;
+function linkHtml(link, hi = '') {
+  const title = hi ? hilite(link.title || '', hi) : esc(link.title || '');
+  const desc  = hi ? hilite(link.description || '', hi) : esc(link.description || '');
+  return '<a class="link-item" data-url="' + esc(link.url) + '" href="#">' +
+    favicon(link) +
+    '<div class="link-info"><div class="link-title">' + title + '</div>' +
+    (link.description ? '<div class="link-desc">' + desc + '</div>' : '') +
+    '</div><button class="link-open-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+    '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>' +
+    '<polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>' +
+    '</svg></button></a>';
 }
 
-function buildFaviconHtml(link) {
+function favicon(link) {
   const base = state.baseUrl.replace(/\/$/, '');
   const logo = link.logo_url || link.logo || '';
   if (logo) {
     if (logo.startsWith('http') || logo.startsWith('/')) {
       const src = logo.startsWith('/') ? base + logo : logo;
-      return `<img class="link-favicon" src="${escHtml(src)}" alt=""
-                onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-              <div class="link-favicon-fallback" style="display:none">${getInitial(link.title)}</div>`;
+      return '<img class="link-favicon" src="' + esc(src) + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' +
+             '<div class="link-favicon-fallback" style="display:none">' + ini(link.title) + '</div>';
     }
-    return `<div class="link-favicon-fallback" style="background:var(--bg3);font-size:15px">${logo}</div>`;
+    return '<div class="link-favicon-fallback" style="background:var(--bg3);font-size:15px">' + logo + '</div>';
   }
   try {
-    const domain = new URL(link.url).hostname;
-    return `<img class="link-favicon" src="https://www.google.com/s2/favicons?domain=${domain}&sz=32" alt=""
-              onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-            <div class="link-favicon-fallback" style="display:none">${getInitial(link.title)}</div>`;
-  } catch {
-    return `<div class="link-favicon-fallback">${getInitial(link.title)}</div>`;
-  }
+    const d = new URL(link.url).hostname;
+    return '<img class="link-favicon" src="https://www.google.com/s2/favicons?domain=' + d + '&sz=32" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' +
+           '<div class="link-favicon-fallback" style="display:none">' + ini(link.title) + '</div>';
+  } catch { return '<div class="link-favicon-fallback">' + ini(link.title) + '</div>'; }
 }
 
-function attachLinkListeners(container) {
+function bindLinks(container) {
   container.querySelectorAll('.link-item').forEach(el => {
     el.addEventListener('click', e => {
       if (e.target.closest('.link-open-btn')) return;
-      e.preventDefault();
-      chrome.tabs.create({ url: el.dataset.url });
+      e.preventDefault(); chrome.tabs.create({ url: el.dataset.url });
     });
     el.querySelector('.link-open-btn')?.addEventListener('click', e => {
-      e.preventDefault(); e.stopPropagation();
-      chrome.tabs.create({ url: el.dataset.url });
+      e.preventDefault(); e.stopPropagation(); chrome.tabs.create({ url: el.dataset.url });
     });
   });
 }
 
 // ── Search ──
-function performSearch(query) {
-  const q = query.trim().toLowerCase();
+function performSearch(q) {
+  q = q.trim().toLowerCase();
   const sr = $('search-results'), tc = $('tab-content'), tn = $('tabs-nav');
-  if (!q) {
-    sr.style.display = 'none'; tc.style.display = ''; tn.style.display = '';
-    return;
-  }
-  tc.style.display = 'none'; tn.style.display = 'none'; sr.style.display = '';
-  const matches = state.allLinks.filter(l =>
-    [l.title, l.description||'', l.url, l.tabTitle, l.sectionTitle].join(' ').toLowerCase().includes(q)
-  );
-  $('results-header').textContent = `${matches.length} Ergebnis${matches.length !== 1 ? 'se' : ''}`;
+  if (!q) { sr.style.display='none'; tc.style.display=''; tn.style.display=''; return; }
+  tc.style.display='none'; tn.style.display='none'; sr.style.display='';
+  const m = state.allLinks.filter(l =>
+    [l.title,l.description||'',l.url,l.tabTitle,l.sectionTitle].join(' ').toLowerCase().includes(q));
+  const cnt = m.length;
+  $('results-header').textContent = cnt + ' ' + (cnt===1 ? t('results_suffix_one') : t('results_suffix_many'));
   const list = $('results-list');
-  if (!matches.length) {
-    list.innerHTML = `<div class="no-results"><div class="no-results-icon">🔍</div><span>Keine Links für „${escHtml(query)}"</span></div>`;
-    return;
+  if (!cnt) {
+    list.innerHTML = '<div class="no-results"><div class="no-results-icon">🔍</div><span>' +
+      t('no_results_prefix') + ' "' + esc(q) + '"</span></div>'; return;
   }
-  list.innerHTML = matches.map(link => `
-    <a class="link-item" data-url="${escHtml(link.url)}" href="#">
-      ${buildFaviconHtml(link)}
-      <div class="link-info">
-        <div class="link-title">${highlightText(link.title||'', q)}</div>
-        ${link.description ? `<div class="link-desc">${highlightText(link.description, q)}</div>` : ''}
-        <div class="result-breadcrumb"><span>${escHtml(link.tabTitle)}</span> › ${escHtml(link.sectionTitle)}</div>
-      </div>
-      <button class="link-open-btn" title="In neuem Tab öffnen">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-          <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-        </svg>
-      </button>
-    </a>`).join('');
-  attachLinkListeners(list);
+  list.innerHTML = m.map(link =>
+    '<a class="link-item" data-url="' + esc(link.url) + '" href="#">' +
+    favicon(link) +
+    '<div class="link-info"><div class="link-title">' + hilite(link.title||'',q) + '</div>' +
+    (link.description ? '<div class="link-desc">' + hilite(link.description,q) + '</div>' : '') +
+    '<div class="result-breadcrumb"><span>' + esc(link.tabTitle) + '</span> › ' + esc(link.sectionTitle) + '</div>' +
+    '</div><button class="link-open-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+    '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>' +
+    '<polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>' +
+    '</svg></button></a>').join('');
+  bindLinks(list);
 }
 
 function clearSearch() {
-  $('search-input').value = '';
-  $('search-clear').style.display = 'none';
-  performSearch('');
+  $('search-input').value = ''; $('search-clear').style.display = 'none'; performSearch('');
+}
+
+// ── Lang change in popup ──
+async function changeLang(code) {
+  setLang(code);
+  await chrome.storage.local.set({ lang: code });
+  applyLang();
+  // Sync to portal
+  try {
+    const base = state.baseUrl.replace(/\/$/, '');
+    await fetch(base + '/api/settings', {
+      method: 'PUT',
+      headers: { 'Authorization': makeAuth(state.username, state.token), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language: code })
+    });
+  } catch {}
 }
 
 // ── Helpers ──
-function highlightText(text, q) {
-  return escHtml(text).replace(new RegExp(`(${escRegex(q)})`, 'gi'), '<mark>$1</mark>');
-}
-function escHtml(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function escRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
-function getInitial(t) { return (t||'?').charAt(0).toUpperCase(); }
+function hilite(text, q) { return esc(text).replace(new RegExp('('+escRx(q)+')','gi'),'<mark>$1</mark>'); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escRx(s) { return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+function ini(s) { return (s||'?').charAt(0).toUpperCase(); }
 
 // ── Init ──
 async function init() {
-  // Check if background triggered logout
+  // Check background-triggered logout
   const { logoutReason } = await chrome.storage.local.get(['logoutReason']);
   if (logoutReason) {
     await chrome.storage.local.remove(['logoutReason']);
-    await doLogout(logoutReason);
-    return;
+    await doLogout(logoutReason); return;
   }
 
-  const stored = await chrome.storage.sync.get(['baseUrl', 'token', 'username']);
+  const stored = await chrome.storage.sync.get(['baseUrl','token','username']);
   state.baseUrl  = stored.baseUrl  || '';
   state.token    = stored.token    || '';
   state.username = stored.username || '';
 
-  if (!state.baseUrl || !state.token) { showScreen('setup'); return; }
+  // Load lang: local override → portal
+  const { lang } = await chrome.storage.local.get(['lang']);
+  const activeLang = lang || 'de';
+  setLang(activeLang);
+  applyLang();
+  $('lang-select').value = activeLang;
 
-  // Load portal logo in parallel
-  loadPortalLogo(state.baseUrl);
+  if (!state.baseUrl || !state.token || !state.username) { showScreen('setup'); return; }
 
+  loadPortalLogo();
   await loadData();
+
+  // Try to get lang from portal (after data loaded)
+  const portalLang = await fetchPortalLang();
+  if (portalLang && portalLang !== activeLang) {
+    setLang(portalLang);
+    await chrome.storage.local.set({ lang: portalLang });
+    applyLang();
+    $('lang-select').value = portalLang;
+  }
 }
 
-// ── Events ──
 document.addEventListener('DOMContentLoaded', () => {
   $('btn-open-settings')?.addEventListener('click', () => chrome.runtime.openOptionsPage());
   $('btn-logout-settings')?.addEventListener('click', () => chrome.runtime.openOptionsPage());
   $('btn-settings').addEventListener('click', () => chrome.runtime.openOptionsPage());
   $('btn-retry').addEventListener('click', () => loadData(true));
   $('btn-refresh').addEventListener('click', async () => {
-    const btn = $('btn-refresh');
-    btn.classList.add('spinning');
+    $('btn-refresh').classList.add('spinning');
     await loadData(true);
-    btn.classList.remove('spinning');
+    $('btn-refresh').classList.remove('spinning');
   });
 
   const si = $('search-input'), sc = $('search-clear');
-  let t;
+  let tm;
   si.addEventListener('input', () => {
     sc.style.display = si.value ? '' : 'none';
-    clearTimeout(t);
-    t = setTimeout(() => performSearch(si.value), 200);
+    clearTimeout(tm); tm = setTimeout(() => performSearch(si.value), 200);
   });
   sc.addEventListener('click', clearSearch);
   si.addEventListener('keydown', e => { if (e.key === 'Escape') clearSearch(); });
+
+  $('lang-select').addEventListener('change', e => changeLang(e.target.value));
 
   init();
 });
