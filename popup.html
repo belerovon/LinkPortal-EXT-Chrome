@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>LinkPortal</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-brand">
+      <!-- Logo: dynamisch vom Portal geladen (JS ersetzt src) -->
+      <img id="portal-logo" class="portal-logo" src="icons/icon48.png" alt="LinkPortal" style="display:none">
+      <svg id="default-icon" class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+      </svg>
+      <span id="brand-name" class="brand-name">LinkPortal</span>
+    </div>
+    <div class="header-actions">
+      <span id="cache-badge" class="cache-badge" style="display:none" title="Aus Cache">📦</span>
+      <button id="btn-refresh" class="icon-btn" title="Aktualisieren">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+      </button>
+      <button id="btn-settings" class="icon-btn" title="Einstellungen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Search Bar -->
+  <div class="search-container">
+    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+    <input type="text" id="search-input" class="search-input" placeholder="Links durchsuchen…">
+    <button id="search-clear" class="search-clear" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Logout Screen (403 or expired) -->
+  <div id="screen-logout" class="screen" style="display:none">
+    <div class="setup-box">
+      <div class="setup-icon" id="logout-icon">🔒</div>
+      <h2 class="setup-title" id="logout-title">Session abgelaufen</h2>
+      <p class="setup-desc" id="logout-desc">Dein API-Token ist ungültig oder abgelaufen. Bitte erneut konfigurieren.</p>
+      <button id="btn-logout-settings" class="btn btn-primary">Einstellungen öffnen</button>
+    </div>
+  </div>
+
+  <!-- Setup Screen -->
+  <div id="screen-setup" class="screen" style="display:none">
+    <div class="setup-box">
+      <div class="setup-icon">🔗</div>
+      <h2 class="setup-title">Willkommen beim LinkPortal</h2>
+      <p class="setup-desc">Bitte konfiguriere zuerst deine LinkPortal-URL, User-ID und API-Token.</p>
+      <button id="btn-open-settings" class="btn btn-primary">Einstellungen öffnen</button>
+    </div>
+  </div>
+
+  <!-- Loading Screen -->
+  <div id="screen-loading" class="screen" style="display:none">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <span class="loading-text" id="loading-text">Links werden geladen…</span>
+    </div>
+  </div>
+
+  <!-- Error Screen -->
+  <div id="screen-error" class="screen" style="display:none">
+    <div class="error-box">
+      <div class="error-icon">⚠️</div>
+      <h3 class="error-title">Verbindungsfehler</h3>
+      <p id="error-message" class="error-msg"></p>
+      <button id="btn-retry" class="btn btn-primary">Erneut versuchen</button>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div id="screen-main" class="screen" style="display:none">
+    <div class="tabs-nav" id="tabs-nav"></div>
+    <div id="search-results" class="search-results" style="display:none">
+      <div class="results-header" id="results-header"></div>
+      <div id="results-list" class="results-list"></div>
+    </div>
+    <div id="tab-content" class="tab-content"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
