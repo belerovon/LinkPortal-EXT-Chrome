@@ -36,21 +36,21 @@ body{width:420px;background:var(--bg);color:var(--text);font-family:var(--font);
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ── Dropdown ── */
-.dropdown-wrap{position:relative}
-.dropdown-menu{position:absolute;right:0;top:36px;width:190px;
+.dropdown-menu{position:absolute;right:0;top:36px;width:175px;
   background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);
   box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:999;overflow:hidden}
-.dd-version{font-size:11px;color:var(--text-dim);padding:8px 14px 6px;font-weight:600;
-  letter-spacing:.3px;text-transform:uppercase}
 .dd-divider{height:1px;background:var(--border);margin:2px 0}
-.dd-item{display:flex;align-items:center;gap:9px;width:100%;padding:9px 14px;
+.dd-item{display:flex;align-items:center;gap:0;width:100%;padding:9px 14px;
   border:none;background:transparent;color:var(--text-muted);font-family:var(--font);
   font-size:13px;cursor:pointer;text-align:left;transition:background .12s,color .12s}
-.dd-item svg{flex-shrink:0;color:var(--text-dim)}
 .dd-item:hover{background:var(--bg3);color:var(--text)}
-.dd-lang-row{display:flex;gap:6px;padding:8px 14px}
+.dd-bottom-row{display:flex;align-items:center;justify-content:space-between;
+  padding:7px 10px 7px 14px}
+.dd-lang-row{display:flex;gap:4px}
+.dd-version{font-size:10px;color:var(--text-dim);font-weight:600;
+  letter-spacing:.3px;white-space:nowrap}
 .lang-btn{border:none;background:var(--bg3);border-radius:4px;cursor:pointer;
-  font-size:16px;padding:3px 7px;transition:background .12s;border:1px solid transparent}
+  font-size:15px;padding:2px 6px;transition:background .12s;border:1px solid transparent;line-height:1.4}
 .lang-btn:hover{background:var(--surface)}
 .lang-btn.active{border-color:var(--accent)}
 

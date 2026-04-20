@@ -44,7 +44,7 @@ function applyLang() {
   $('btn-refresh').title        = t('refresh');
   $('dd-lbl-portal').textContent= t('open_portal');
   $('dd-lbl-settings').textContent= t('menu_settings');
-  $('dd-version').textContent   = t('version') + ' ' + VERSION;
+  $('dd-version').textContent   = 'v'+VERSION;
   // Settings labels
   $('s-back-lbl').textContent   = t('settings_back');
   $('s-title-lbl').textContent  = t('settings_title');
@@ -105,7 +105,7 @@ const apiDel  = p    => apiFetch('DELETE',p);
 // ── Portal logo + title ──
 async function loadBranding() {
   const base = S.baseUrl.replace(/\/$/,'');
-  // Logo
+  // ── Logo ──
   for(const ext of ['svg','png']) {
     try {
       const r = await fetch(base+'/img/logo.'+ext,{mode:'cors'});
@@ -122,14 +122,30 @@ async function loadBranding() {
       }
     } catch {}
   }
-  // Portal title from app-settings
+  // ── Portal title: try HTML <title> first, then app-settings ──
+  let title = '';
+  // Strategy 1: fetch the portal page HTML and extract <title>
   try {
-    const settings = await apiGet('/admin/app-settings');
-    if(settings?.portal_name) {
-      S.portalTitle = settings.portal_name;
-      $('portal-title').textContent = settings.portal_name;
+    const r = await fetch(base+'/', {credentials:'omit', mode:'cors'});
+    if(r.ok){
+      const html = await r.text();
+      const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+      if(m && m[1]) title = m[1].trim();
     }
   } catch {}
+  // Strategy 2: app-settings (admin-only, may fail for non-admins)
+  if(!title) {
+    try {
+      const settings = await apiGet('/admin/app-settings');
+      title = settings?.portal_name || settings?.site_title || settings?.title || '';
+    } catch {}
+  }
+  // Strategy 3: index.html title attribute via /api/auth/me → display_name or username
+  if(title && title !== 'LinkPortal') {
+    S.portalTitle = title;
+    $('portal-title').textContent = title;
+  }
+  // If still empty or default, keep "LinkPortal" — nothing to do
 }
 
 // ── Logout ──
@@ -336,12 +352,14 @@ function hilite(text,q){return esc(text).replace(new RegExp('('+escRx(q)+')','gi
 // ══════════════════════════════════════════════════
 
 function openLinkDialog(link, tabId) {
-  // Build section options (only editable sections)
+  // Build section options — only sections of type 'links' where user has edit perm
   const secSel=$('dlg-sec'); secSel.innerHTML='';
   let hasOptions=false;
   for(const tab of S.tabs){
     if(!(S.perms[tab.id]||{}).can_edit) continue;
     for(const sec of (S.sections[tab.id]||[])){
+      // Only show Linksammlung sections (type 'links')
+      if(sec.section_type && sec.section_type !== 'links') continue;
       const opt=document.createElement('option');
       opt.value=sec.id; opt.textContent=tab.title+' › '+sec.title;
       if(link&&link.sectionId===sec.id) opt.selected=true;
