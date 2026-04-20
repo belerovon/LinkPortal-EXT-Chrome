@@ -185,9 +185,9 @@ body{width:420px;background:var(--bg);color:var(--text);font-family:var(--font);
 .link-item.dragging{opacity:.35;pointer-events:none}
 .drop-line{height:2px;background:var(--accent);margin:0 13px;display:none;border-radius:1px;pointer-events:none}
 .drag-handle{width:14px;color:var(--text-dim);flex-shrink:0;cursor:grab;
-  opacity:0;transition:opacity .12s;display:flex;align-items:center;touch-action:none}
-.link-item:hover .drag-handle{opacity:1}
-.drag-handle svg{width:12px;height:12px}
+  opacity:0.25;transition:opacity .12s;display:flex;align-items:center;touch-action:none}
+.link-item:hover .drag-handle{opacity:0.8}
+.drag-handle:active{cursor:grabbing}
 .link-favicon{width:20px;height:20px;border-radius:4px;object-fit:contain;
   flex-shrink:0;background:var(--bg3)}
 .link-favicon-fallback{width:20px;height:20px;border-radius:4px;flex-shrink:0;

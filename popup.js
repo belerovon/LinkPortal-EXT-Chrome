@@ -343,12 +343,11 @@ function renderTabContent(tabId) {
       (sec.icon?'<span class="section-icon">'+sec.icon+'</span>':'')+
       '<span class="section-title">'+esc(sec.title)+'</span>'+
       '<span class="section-count">'+lnks.length+'</span></div>'+
-      lnks.map(l=>linkHtml(l,canEdit,canDel)).join('')+'</div>';
+      lnks.map(l=>linkHtml({...l, sectionId:sec.id}, canEdit, canDel)).join('')+'</div>';
   }
   content.innerHTML = has ? html :
     '<div class="empty-tab"><div class="empty-icon">📭</div><p>'+t('no_links')+'</p></div>';
   bindLinks(content, tabId, canEdit, canDel);
-  if(canEdit) initDragDrop(content, tabId);
 }
 
 // ── Link HTML ──
@@ -408,94 +407,73 @@ function bindLinks(container, tabId, canEdit, canDel) {
 }
 
 // ── Drag & Drop — pointer events with capture (works in Extension popups) ──
-function initDragDrop(container, tabId) {
-  let drag = null;
-  // drag = { item, secId, secBlock, line, captureId, target, before }
+// ── Global DnD — one-time init, avoids listener buildup on tab switches ──
+let _dnd = null;
 
-  container.addEventListener('pointerdown', e => {
+function initGlobalDnD() {
+  document.addEventListener('pointerdown', e => {
     if (!e.target.closest('.drag-handle')) return;
     const item = e.target.closest('.link-item');
-    if (!item) return;
+    if (!item || !item.closest('#tab-content')) return;
     e.preventDefault();
+
     const secId = parseInt(item.dataset.sec);
+    if (isNaN(secId)) { console.warn('[LP] drag: NaN secId, dataset.sec=', item.dataset.sec); return; }
     const secBlock = item.closest('.section-block');
     if (!secBlock) return;
 
-    // Drop indicator line
     const line = document.createElement('div');
     line.className = 'drop-line';
-
-    drag = { item, secId, secBlock, line, pointerId: e.pointerId, dropTarget: null, dropBefore: true };
-    item.classList.add('dragging');
     item.after(line);
-
-    // Capture keeps pointermove firing even if pointer leaves popup bounds
-    try { item.setPointerCapture(e.pointerId); } catch {}
+    item.classList.add('dragging');
+    _dnd = { item, secId, secBlock, line, dropTarget: null, dropBefore: true };
   }, { passive: false });
 
-  container.addEventListener('pointermove', e => {
-    if (!drag) return;
+  document.addEventListener('pointermove', e => {
+    if (!_dnd) return;
     e.preventDefault();
-
-    // Hide dragging element temporarily to hit-test what's underneath
-    drag.item.style.visibility = 'hidden';
+    _dnd.item.style.visibility = 'hidden';
     const under = document.elementFromPoint(e.clientX, e.clientY);
-    drag.item.style.visibility = '';
+    _dnd.item.style.visibility = '';
     if (!under) return;
-
     const target = under.closest('.link-item');
-    if (!target || target === drag.item || target.dataset.sec !== String(drag.secId)) return;
-
+    if (!target || target === _dnd.item) return;
+    if (parseInt(target.dataset.sec) !== _dnd.secId) return;
     const rect = target.getBoundingClientRect();
     const before = e.clientY < rect.top + rect.height / 2;
-
-    drag.dropTarget = target;
-    drag.dropBefore = before;
-
-    // Move the indicator line
-    if (before) target.before(drag.line);
-    else target.after(drag.line);
-    drag.line.style.display = 'block';
+    _dnd.dropTarget = target;
+    _dnd.dropBefore = before;
+    _dnd.line.style.display = 'block';
+    if (before) target.before(_dnd.line);
+    else target.after(_dnd.line);
   }, { passive: false });
 
-  const finish = async e => {
-    if (!drag) return;
-    const { item, secId, secBlock, line, dropTarget, dropBefore } = drag;
-    drag = null;
-
+  const finishDnD = async () => {
+    if (!_dnd) return;
+    const { item, secId, secBlock, line, dropTarget, dropBefore } = _dnd;
+    _dnd = null;
     item.classList.remove('dragging');
     item.style.visibility = '';
-
-    // Insert at new position
-    if (dropTarget) {
-      if (dropBefore) dropTarget.before(item);
-      else dropTarget.after(item);
-    }
     line.remove();
-
-    if (!dropTarget) return; // no movement
-
+    if (!dropTarget) return;
+    if (dropBefore) dropTarget.before(item);
+    else dropTarget.after(item);
     const newOrder = [...secBlock.querySelectorAll('.link-item')]
-      .map(i => parseInt(i.dataset.id)).filter(Boolean);
-
-    S.links[secId] = newOrder
-      .map(id => (S.links[secId]||[]).find(l => l.id === id))
-      .filter(Boolean);
-
+      .map(i => parseInt(i.dataset.id)).filter(id => !isNaN(id));
+    S.links[secId] = newOrder.map(id => (S.links[secId]||[]).find(l => l.id===id)).filter(Boolean);
     try {
-      await apiPut('/sections/' + secId + '/links/sort', { ids: newOrder });
+      await apiPut('/sections/'+secId+'/links/sort', { ids: newOrder });
       const { cache } = await chrome.storage.local.get(['cache']);
       if (cache) { cache.links[secId] = S.links[secId]; await chrome.storage.local.set({ cache }); }
-    } catch(err) { console.warn('[LinkPortal] sort save failed:', err.message); }
+    } catch(err) { console.warn('[LP] sort:', err.message); }
   };
-
-  container.addEventListener('pointerup',     finish);
-  container.addEventListener('pointercancel', e => {
-    if (!drag) return;
-    drag.item.classList.remove('dragging');
-    drag.item.style.visibility = '';
-    drag.line.remove();
-    drag = null;
+  document.addEventListener('pointerup', finishDnD);
+  document.addEventListener('pointercancel', () => {
+    if (!_dnd) return;
+    _dnd.item.classList.remove('dragging');
+    _dnd.item.style.visibility = '';
+    _dnd.line.remove();
+    _dnd = null;
   });
 }
 
@@ -819,6 +797,7 @@ async function init(){
 }
 
 document.addEventListener('DOMContentLoaded',()=>{
+  initGlobalDnD(); // one-time global DnD — must be first
   watchSettingsFields();
 
   // Setup/Logout buttons
