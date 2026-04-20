@@ -5,6 +5,24 @@
 const VERSION = '1.5.0';
 const MAX_INACTIVE_DAYS = 30;
 
+// ── 403 Threshold: 3 failures within 5 minutes triggers logout ──
+const THRESH_MAX = 3;
+const THRESH_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+
+async function record403() {
+  const now = Date.now();
+  const { err403 } = await chrome.storage.local.get(['err403']);
+  const list = (err403 || []).filter(ts => now - ts < THRESH_WINDOW_MS);
+  list.push(now);
+  await chrome.storage.local.set({ err403: list });
+  console.warn(`[LP] 403 count in last 5min: ${list.length}/${THRESH_MAX}`);
+  return list.length >= THRESH_MAX;
+}
+
+async function clear403() {
+  await chrome.storage.local.remove(['err403']);
+}
+
 const S = {
   baseUrl:'', token:'', username:'', lang:'en',
   theme:'auto',
@@ -143,52 +161,101 @@ const apiDel  = p    => apiFetch('DELETE',p);
 async function loadBranding() {
   const base = S.baseUrl.replace(/\/$/,'');
 
-  // Check logo cache first
-  const { logoDataUrl, logoSrc } = await chrome.storage.local.get(['logoDataUrl','logoSrc']);
-  if(logoDataUrl) {
-    $('portal-logo').src = logoDataUrl;
+  // ── Show cached logo immediately (SVG for display, PNG for toolbar) ──
+  const cached = await chrome.storage.local.get(['logoDisplayUrl','logoPngUrl']);
+  if(cached.logoDisplayUrl) {
+    $('portal-logo').src = cached.logoDisplayUrl;
     $('portal-logo').style.display = '';
     $('default-icon').style.display = 'none';
   }
 
-  // Fetch fresh logo
-  for(const ext of ['svg','png']) {
+  // ── Fetch SVG for popup header (best quality for display) ──
+  const svgOk = await (async () => {
     try {
-      const r = await fetch(base+'/img/logo.'+ext, {mode:'cors'});
-      if(!r.ok) continue;
+      const r = await fetch(base+'/img/logo.svg', {mode:'cors'});
+      if(!r.ok) return false;
       const blob = await r.blob();
-      const reader = new FileReader();
-      reader.onload = async e => {
-        const dataUrl = e.target.result;
-        $('portal-logo').src = dataUrl;
-        $('portal-logo').style.display = '';
-        $('default-icon').style.display = 'none';
-        await chrome.storage.local.set({ logoDataUrl: dataUrl });
-
-        // For PNG: set toolbar icon immediately and cache data URL for background restore
-        if(ext === 'png') {
-          const img = new Image();
-          img.onload = async () => {
-            try {
-              const d = {};
-              for(const sz of [16, 48]) {
-                const c = document.createElement('canvas');
-                c.width = c.height = sz;
-                c.getContext('2d').drawImage(img, 0, 0, sz, sz);
-                d[sz] = c.getContext('2d').getImageData(0, 0, sz, sz);
-              }
-              chrome.action.setIcon({ imageData: d }).catch(()=>{});
-            } catch {}
+      return await new Promise(res => {
+        const rd = new FileReader();
+        rd.onload = async ev => {
+          const url = ev.target.result;
+          $('portal-logo').src = url;
+          $('portal-logo').style.display = '';
+          $('default-icon').style.display = 'none';
+          await chrome.storage.local.set({ logoDisplayUrl: url });
+          res(true);
+        };
+        rd.onerror = () => res(false);
+        rd.readAsDataURL(blob);
+      });
+    } catch { return false; }
+  })();
+  if(!svgOk) {
+    // Try PNG as display fallback too
+    try {
+      const r = await fetch(base+'/img/logo.png', {mode:'cors'});
+      if(r.ok) {
+        const blob = await r.blob();
+        await new Promise(res => {
+          const rd = new FileReader();
+          rd.onload = async ev => {
+            const url = ev.target.result;
+            $('portal-logo').src = url;
+            $('portal-logo').style.display = '';
+            $('default-icon').style.display = 'none';
+            await chrome.storage.local.set({ logoDisplayUrl: url });
+            res();
           };
-          img.src = dataUrl;
-        }
-      };
-      reader.readAsDataURL(blob);
-      break;
+          rd.onerror = () => res();
+          rd.readAsDataURL(blob);
+        });
+      }
     } catch {}
   }
 
-  // Portal title: try HTML <title>
+  // ── Fetch PNG specifically for Chrome toolbar icon (SVG not supported) ──
+  // Also try favicon.ico as ultimate fallback
+  for(const path of ['/img/logo.png', '/favicon.ico', '/img/favicon.png']) {
+    try {
+      const r = await fetch(base+path, {mode:'cors'});
+      if(!r.ok) continue;
+      const contentType = r.headers.get('content-type')||'';
+      if(!contentType.includes('png') && !contentType.includes('ico') && !contentType.includes('image')) continue;
+      const blob = await r.blob();
+      const pngUrl = await new Promise(res => {
+        const rd = new FileReader();
+        rd.onload = ev => res(ev.target.result);
+        rd.onerror = () => res(null);
+        rd.readAsDataURL(blob);
+      });
+      if(!pngUrl) continue;
+
+      // Render to canvas → ImageData → setIcon
+      await new Promise(res => {
+        const img = new Image();
+        img.onload = async () => {
+          try {
+            const d = {};
+            for(const sz of [16, 48]) {
+              const c = document.createElement('canvas');
+              c.width = c.height = sz;
+              c.getContext('2d').drawImage(img, 0, 0, sz, sz);
+              d[sz] = c.getContext('2d').getImageData(0, 0, sz, sz);
+            }
+            chrome.action.setIcon({ imageData: d }).catch(()=>{});
+            // Store PNG data URL so background.js can restore on startup
+            await chrome.storage.local.set({ logoPngUrl: pngUrl });
+          } catch {}
+          res();
+        };
+        img.onerror = () => res();
+        img.src = pngUrl;
+      });
+      break; // success — stop trying
+    } catch {}
+  }
+
+  // ── Portal title ──
   try {
     const r = await fetch(base+'/', {credentials:'omit', mode:'cors'});
     if(r.ok) {
@@ -201,7 +268,6 @@ async function loadBranding() {
       }
     }
   } catch {}
-  // Fallback: app-settings
   if(S.portalTitle === 'LinkPortal') {
     try {
       const settings = await apiGet('/admin/app-settings');
@@ -264,9 +330,9 @@ async function loadData(force=false) {
         bgRefresh(); return;
       }
     }
-    applyData(await fetchFromApi()); renderAll(); showScreen('main');
+    applyData(await fetchFromApi()); clear403(); renderAll(); showScreen('main');
   } catch(err) {
-    if(err.status===403){await doLogout('403');return;}
+    if(err.status===403){if(await record403())await doLogout('403');else{$('error-message').textContent=t('test_err_403');showScreen('error');}return;}
     const {cache}=await chrome.storage.local.get(['cache']);
     if(cache){applyData(cache);renderAll();showScreen('main');
       $('cache-badge').style.display='';
@@ -276,9 +342,9 @@ async function loadData(force=false) {
 }
 
 async function bgRefresh() {
-  try{applyData(await fetchFromApi());$('cache-badge').style.display='none';
+  try{applyData(await fetchFromApi());clear403();$('cache-badge').style.display='none';
     if(S.activeTab)renderTabContent(S.activeTab);}
-  catch(e){if(e.status===403)await doLogout('403');}
+  catch(e){if(e.status===403){if(await record403())await doLogout('403');}}
 }
 
 // ── Render ──
@@ -587,6 +653,11 @@ function showDlgErr(msg){$('dlg-err').style.display='';$('dlg-err').textContent=
 // ══════════════════════════════════════════
 async function openSettings() {
   closeDropdown();
+  // Show extension ID
+  try {
+    const id = chrome.runtime.id || '–';
+    $('s-ext-id').textContent = id;
+  } catch {}
   const stored=await chrome.storage.sync.get(['baseUrl','token','username']);
   $('s-base-url').value  = stored.baseUrl||'';
   $('s-username').value  = stored.username||'';
@@ -660,6 +731,7 @@ async function saveSettings(){
   if(!token){showStatus('⚠ No token','error');return;}
   await chrome.storage.sync.set({baseUrl,token,username});
   S.baseUrl=baseUrl; S.token=token; S.username=username;
+  clear403(); // reset error count on fresh save
   S.tokenSaved=true;
   $('s-api-token').value=''; $('s-api-token').readOnly=true;
   $('s-api-token').placeholder=t('lbl_token_hint');
@@ -763,7 +835,7 @@ async function init(){
 
   // Load stored prefs
   const stored=await chrome.storage.sync.get(['baseUrl','token','username']);
-  const local=await chrome.storage.local.get(['lang','theme','logoDataUrl']);
+  const local=await chrome.storage.local.get(['lang','theme','logoDisplayUrl']);
 
   S.baseUrl=stored.baseUrl||''; S.token=stored.token||''; S.username=stored.username||'';
 
@@ -776,8 +848,8 @@ async function init(){
   applyLang();
 
   // Show cached logo immediately
-  if(local.logoDataUrl){
-    $('portal-logo').src=local.logoDataUrl;
+  if(local.logoDisplayUrl){
+    $('portal-logo').src=local.logoDisplayUrl;
     $('portal-logo').style.display='';
     $('default-icon').style.display='none';
   }
@@ -840,6 +912,14 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   // Settings panel
   $('btn-settings-back').addEventListener('click',closeSettings);
+  $('s-btn-copy-id')?.addEventListener('click', () => {
+    const id = $('s-ext-id').textContent;
+    navigator.clipboard.writeText(id).then(() => {
+      const btn = $('s-btn-copy-id');
+      btn.textContent = '✓';
+      setTimeout(() => btn.textContent = '📋', 1500);
+    }).catch(() => {});
+  });
   $('s-btn-test').addEventListener('click',testConnection);
   $('s-btn-save').addEventListener('click',saveSettings);
   $('s-btn-reset').addEventListener('click',resetSettings);

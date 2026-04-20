@@ -286,3 +286,9 @@ mark{background:rgba(78,127,242,0.25);color:var(--accent);border-radius:2px;padd
   padding:12px 14px;border-top:1px solid var(--border);flex-shrink:0}
 .dlg-label-row{display:flex;align-items:center;justify-content:space-between}
 .dlg-body .input{padding-left:10px}
+
+/* ── Extension ID display ── */
+.ext-id-row{display:flex;align-items:center;gap:8px}
+.ext-id-code{flex:1;font-family:monospace;font-size:10.5px;color:var(--text-muted);
+  background:var(--bg3);padding:6px 10px;border-radius:var(--rs);
+  border:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

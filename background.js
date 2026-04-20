@@ -6,6 +6,18 @@
 const ALARM_NAME        = 'linkportal-sync';
 const SYNC_MINUTES      = 30;
 const MAX_INACTIVE_DAYS = 30;
+const THRESH_MAX        = 3;
+const THRESH_WINDOW_MS  = 5 * 60 * 1000; // 5 minutes
+
+async function record403bg() {
+  const now = Date.now();
+  const { err403 } = await chrome.storage.local.get(['err403']);
+  const list = (err403 || []).filter(ts => now - ts < THRESH_WINDOW_MS);
+  list.push(now);
+  await chrome.storage.local.set({ err403: list });
+  console.warn(`[LP-bg] 403 count: ${list.length}/${THRESH_MAX}`);
+  return list.length >= THRESH_MAX;
+}
 
 chrome.runtime.onInstalled.addListener(() => scheduleAlarm());
 chrome.runtime.onStartup.addListener(() => {
@@ -14,18 +26,14 @@ chrome.runtime.onStartup.addListener(() => {
   scheduleAlarm();
 });
 
-// ── Restore toolbar icon from cached logo data URL ──
-// Uses OffscreenCanvas + createImageBitmap — both available in Chrome service workers
+// ── Restore toolbar icon from cached PNG data URL ──
 async function restoreIcon() {
   try {
-    const { logoDataUrl } = await chrome.storage.local.get(['logoDataUrl']);
-    if (!logoDataUrl || !logoDataUrl.startsWith('data:image/png')) return;
-
-    // Fetch the stored data URL as a blob
-    const res  = await fetch(logoDataUrl);
+    const { logoPngUrl } = await chrome.storage.local.get(['logoPngUrl']);
+    if (!logoPngUrl) return;
+    const res  = await fetch(logoPngUrl);
     const blob = await res.blob();
     const bmp  = await createImageBitmap(blob);
-
     const imageData = {};
     for (const sz of [16, 48]) {
       const oc  = new OffscreenCanvas(sz, sz);
@@ -35,7 +43,6 @@ async function restoreIcon() {
     }
     await chrome.action.setIcon({ imageData });
   } catch (e) {
-    // Silently fail — default icon will show
     console.warn('[LinkPortal] restoreIcon:', e.message);
   }
 }
@@ -97,8 +104,13 @@ async function syncInBackground() {
   try {
     const data = await fetchAllData(baseUrl, username, token);
     await chrome.storage.local.set({ cache: data, cacheTime: Date.now() });
+    // Successful — reset 403 counter
+    await chrome.storage.local.remove(['err403']);
   } catch (err) {
-    if (err.status === 403 || (err.message||'').includes('403')) await performLogout('403');
+    if (err.status === 403 || (err.message||'').includes('403')) {
+      if (await record403bg()) await performLogout('403');
+      // else: transient 403, wait for next sync cycle
+    }
   }
 }
 
@@ -116,8 +128,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         chrome.storage.local.set({ cache: data, cacheTime: Date.now() });
         sendResponse({ ok: true, data });
       })
-      .catch(err => {
-        if (err.status === 403) performLogout('403');
+      .catch(async err => {
+        if (err.status === 403) { if (await record403bg()) performLogout('403'); }
         sendResponse({ ok: false, error: err.message });
       });
     return true;
@@ -126,4 +138,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     performLogout(msg.reason || 'manual').then(() => sendResponse({ ok: true }));
     return true;
   }
+});
+
+// ── Auto-Config from LinkPortal portal page ──
+// Called via: chrome.runtime.sendMessage(EXTENSION_ID, { action:'autoConfig', ... })
+chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
+  if (msg.action !== 'autoConfig') { sendResponse({ ok: false, error: 'unknown action' }); return; }
+
+  const { baseUrl, username, token } = msg;
+  if (!baseUrl || !username || !token) {
+    sendResponse({ ok: false, error: 'missing baseUrl, username or token' }); return;
+  }
+
+  // Verify credentials before saving
+  fetch(baseUrl.replace(/\/$/,'') + '/api/tabs', {
+    headers: { 'Authorization': makeBasicAuth(username, token) },
+    credentials: 'omit'
+  }).then(async r => {
+    if (!r.ok) { sendResponse({ ok: false, error: 'HTTP ' + r.status }); return; }
+    await chrome.storage.sync.set({ baseUrl: baseUrl.replace(/\/$/,''), username, token });
+    // Clear stale cache so next popup open fetches fresh data
+    await chrome.storage.local.remove(['cache', 'cacheTime']);
+    sendResponse({ ok: true, message: 'LinkPortal Extension erfolgreich konfiguriert!' });
+  }).catch(err => sendResponse({ ok: false, error: err.message }));
+
+  return true; // keep channel open for async
 });
