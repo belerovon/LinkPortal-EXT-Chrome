@@ -36,16 +36,6 @@
         <button class="dd-item" id="dd-open-portal"><span id="dd-lbl-portal">Portal öffnen</span></button>
         <button class="dd-item" id="dd-settings"><span id="dd-lbl-settings">Einstellungen</span></button>
         <div class="dd-divider"></div>
-        <!-- Theme toggle -->
-        <div class="dd-row dd-theme-row">
-          <span class="dd-label" id="dd-lbl-theme">Design</span>
-          <div class="theme-btns">
-            <button class="theme-btn" data-theme="light" title="Hell">☀️</button>
-            <button class="theme-btn" data-theme="auto" title="Auto">🌗</button>
-            <button class="theme-btn" data-theme="dark" title="Dunkel">🌙</button>
-          </div>
-        </div>
-        <!-- Language dropdown -->
         <div class="dd-row">
           <span class="dd-label" id="dd-lbl-lang">Sprache</span>
           <select id="dd-lang-sel" class="dd-lang-select">
@@ -201,6 +191,24 @@
         <div class="btn-row">
           <button id="s-btn-sync" class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span id="s-lbl-sync-now"></span></button>
           <button id="s-btn-clear" class="btn btn-ghost"><span id="s-lbl-clear"></span></button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" id="s-lbl-theme-title"></div>
+        <div class="theme-row">
+          <button class="theme-btn-lg" data-theme="light" id="s-theme-light">
+            <span class="theme-btn-icon">☀️</span>
+            <span id="s-lbl-theme-light">Hell</span>
+          </button>
+          <button class="theme-btn-lg" data-theme="auto" id="s-theme-auto">
+            <span class="theme-btn-icon">🌗</span>
+            <span id="s-lbl-theme-auto">Auto</span>
+          </button>
+          <button class="theme-btn-lg" data-theme="dark" id="s-theme-dark">
+            <span class="theme-btn-icon">🌙</span>
+            <span id="s-lbl-theme-dark">Dunkel</span>
+          </button>
         </div>
       </div>
 

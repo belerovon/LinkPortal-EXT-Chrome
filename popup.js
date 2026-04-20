@@ -28,7 +28,8 @@ const apiUrl = p => S.baseUrl.replace(/\/$/,'')+'/api'+p;
 function applyTheme(theme) {
   S.theme = theme || 'auto';
   document.documentElement.dataset.theme = S.theme;
-  document.querySelectorAll('.theme-btn').forEach(b =>
+  // Update settings panel buttons
+  document.querySelectorAll('.theme-btn-lg').forEach(b =>
     b.classList.toggle('active', b.dataset.theme === S.theme));
 }
 
@@ -52,10 +53,14 @@ function applyLang() {
     $('btn-refresh').title           = t('refresh');
     $('dd-lbl-portal').textContent   = t('open_portal');
     $('dd-lbl-settings').textContent = t('menu_settings');
-    $('dd-lbl-theme').textContent    = t('menu_theme')||'Design';
     $('dd-lbl-lang').textContent     = t('menu_lang');
     $('dd-version').textContent      = ver;
     $('dd-lang-sel').value           = _lang;
+    // Settings — theme
+    $('s-lbl-theme-title').textContent  = t('menu_theme')||'Design';
+    $('s-lbl-theme-light').textContent  = t('theme_light')||'Hell';
+    $('s-lbl-theme-auto').textContent   = t('theme_auto')||'Auto';
+    $('s-lbl-theme-dark').textContent   = t('theme_dark')||'Dunkel';
     // Settings
     $('s-back-lbl').textContent      = t('settings_back');
     $('s-title-lbl').textContent     = t('settings_title');
@@ -809,8 +814,8 @@ document.addEventListener('DOMContentLoaded',()=>{
     }
   });
 
-  // Theme buttons
-  document.querySelectorAll('.theme-btn').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation();changeTheme(b.dataset.theme);}));
+  // Theme buttons (in settings panel)
+  document.querySelectorAll('.theme-btn-lg').forEach(b=>b.addEventListener('click',()=>changeTheme(b.dataset.theme)));
 
   // Language dropdown in menu
   $('dd-lang-sel').addEventListener('change',e=>{e.stopPropagation();changeLang(e.target.value);});

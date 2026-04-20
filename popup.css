@@ -75,6 +75,15 @@ body{width:420px;background:var(--bg);color:var(--text);font-family:var(--font);
   cursor:pointer;outline:none;flex:1;max-width:120px}
 .dd-version-row{padding:5px 14px 7px}
 .dd-version{font-size:10px;color:var(--text-dim);font-weight:600;letter-spacing:.3px}
+/* Theme buttons in settings panel */
+.theme-row{display:flex;gap:8px}
+.theme-btn-lg{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;
+  padding:10px 8px;border:1.5px solid var(--border);border-radius:var(--rs);
+  background:var(--bg3);color:var(--text-muted);font-family:var(--font);
+  font-size:11.5px;font-weight:500;cursor:pointer;transition:all .15s}
+.theme-btn-lg:hover{border-color:var(--accent);color:var(--text);background:var(--surface)}
+.theme-btn-lg.active{border-color:var(--accent);background:rgba(78,127,242,0.12);color:var(--accent)}
+.theme-btn-icon{font-size:18px;line-height:1}
 
 /* ── Search ── */
 .search-container{position:relative;padding:9px 13px;background:var(--bg2);
