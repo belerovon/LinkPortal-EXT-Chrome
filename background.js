@@ -1,6 +1,6 @@
 /* ════════════════════════════════════════════════════
-   LinkPortal Extension — background.js  v1.3
-   Basic Auth, Periodic Sync, 30-day Logout
+   LinkPortal Extension — background.js  v1.5.0
+   Basic Auth · Periodic Sync · 30-day Logout
    ════════════════════════════════════════════════════ */
 
 const ALARM_NAME        = 'linkportal-sync';
@@ -25,14 +25,15 @@ async function checkExpiry() {
   if (days >= MAX_INACTIVE_DAYS) await performLogout('expired');
 }
 
+// ── Logout: keep URL + username, only remove token ──
 async function performLogout(reason) {
-  await chrome.storage.local.clear();
-  await chrome.storage.sync.remove(['token', 'username']);
+  await chrome.storage.local.remove(['cache', 'cacheTime']);
+  await chrome.storage.sync.remove(['token']); // ← only token!
   await chrome.storage.local.set({ logoutReason: reason });
 }
 
 function makeBasicAuth(username, token) {
-  return 'Basic ' + btoa(unescape(encodeURIComponent(username + ':' + token)));
+  return 'Basic ' + btoa(unescape(encodeURIComponent((username||'') + ':' + (token||''))));
 }
 
 async function fetchAllData(baseUrl, username, token) {
@@ -47,8 +48,9 @@ async function fetchAllData(baseUrl, username, token) {
   }
 
   const tabs = await get('/tabs');
-  const result = { tabs, sections: {}, links: {}, syncTime: Date.now() };
+  const result = { tabs, sections: {}, links: {}, perms: {}, syncTime: Date.now() };
   for (const tab of tabs) {
+    result.perms[tab.id] = tab.perms || { can_read:true, can_edit:false, can_delete:false };
     const sections = await get('/tabs/' + tab.id + '/sections');
     result.sections[tab.id] = sections;
     for (const sec of sections) {
