@@ -53,7 +53,6 @@ function applyLang() {
     $('btn-refresh').title           = t('refresh');
     $('dd-lbl-portal').textContent   = t('open_portal');
     $('dd-lbl-settings').textContent = t('menu_settings');
-    $('dd-lbl-lang').textContent     = t('menu_lang');
     $('dd-version').textContent      = ver;
     $('dd-lang-sel').value           = _lang;
     // Settings — theme

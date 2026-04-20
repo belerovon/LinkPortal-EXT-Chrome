@@ -72,9 +72,10 @@ body{width:420px;background:var(--bg);color:var(--text);font-family:var(--font);
 .theme-btn.active{border-color:var(--accent)}
 .dd-lang-select{background:var(--bg3);border:1px solid var(--border);border-radius:4px;
   color:var(--text);font-family:var(--font);font-size:12px;padding:3px 4px;
-  cursor:pointer;outline:none;flex:1;max-width:120px}
-.dd-version-row{padding:5px 14px 7px}
-.dd-version{font-size:10px;color:var(--text-dim);font-weight:600;letter-spacing:.3px}
+  cursor:pointer;outline:none;max-width:110px}
+.dd-footer-row{display:flex;align-items:center;justify-content:space-between;
+  padding:7px 12px 8px 14px;gap:8px}
+.dd-version{font-size:10px;color:var(--text-dim);font-weight:600;letter-spacing:.3px;white-space:nowrap}
 /* Theme buttons in settings panel */
 .theme-row{display:flex;gap:8px}
 .theme-btn-lg{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;
