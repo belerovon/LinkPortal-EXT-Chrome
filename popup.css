@@ -182,9 +182,10 @@ body{width:420px;background:var(--bg);color:var(--text);font-family:var(--font);
   user-select:none}
 .link-item:hover{background:var(--bg2);border-left-color:var(--accent)}
 .link-item.drag-over{background:rgba(78,127,242,0.1);border-top:2px solid var(--accent)}
-.link-item.dragging{opacity:.35}
+.link-item.dragging{opacity:.35;pointer-events:none}
+.drop-line{height:2px;background:var(--accent);margin:0 13px;display:none;border-radius:1px;pointer-events:none}
 .drag-handle{width:14px;color:var(--text-dim);flex-shrink:0;cursor:grab;
-  opacity:0;transition:opacity .12s;display:flex;align-items:center}
+  opacity:0;transition:opacity .12s;display:flex;align-items:center;touch-action:none}
 .link-item:hover .drag-handle{opacity:1}
 .drag-handle svg{width:12px;height:12px}
 .link-favicon{width:20px;height:20px;border-radius:4px;object-fit:contain;

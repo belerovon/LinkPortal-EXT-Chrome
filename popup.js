@@ -165,26 +165,19 @@ async function loadBranding() {
         $('default-icon').style.display = 'none';
         await chrome.storage.local.set({ logoDataUrl: dataUrl });
 
-        // For PNG: build pixel arrays at 16 and 48px so background.js
-        // can restore the toolbar icon without needing canvas/DOM
+        // For PNG: set toolbar icon immediately and cache data URL for background restore
         if(ext === 'png') {
           const img = new Image();
           img.onload = async () => {
             try {
-              const iconData = {};
-              const pixelArrays = {};
+              const d = {};
               for(const sz of [16, 48]) {
                 const c = document.createElement('canvas');
                 c.width = c.height = sz;
-                const ctx = c.getContext('2d');
-                ctx.drawImage(img, 0, 0, sz, sz);
-                const id = ctx.getImageData(0, 0, sz, sz);
-                iconData[sz] = id;
-                // Store as plain array so service worker can reconstruct ImageData
-                pixelArrays[sz] = Array.from(id.data);
+                c.getContext('2d').drawImage(img, 0, 0, sz, sz);
+                d[sz] = c.getContext('2d').getImageData(0, 0, sz, sz);
               }
-              chrome.action.setIcon({ imageData: iconData }).catch(()=>{});
-              await chrome.storage.local.set({ logoPixels: pixelArrays });
+              chrome.action.setIcon({ imageData: d }).catch(()=>{});
             } catch {}
           };
           img.src = dataUrl;
@@ -366,8 +359,7 @@ function linkHtml(link, canEdit, canDel, hi='') {
   const editSvg='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
   const delSvg ='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
   const dragSvg='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="18" x2="16" y2="18"/></svg>';
-  return '<a class="link-item" data-id="'+link.id+'" data-sec="'+link.sectionId+'" data-url="'+esc(link.url)+'" href="#"'+
-    (canEdit?' draggable="true"':'')+'>'+
+  return '<a class="link-item" data-id="'+link.id+'" data-sec="'+link.sectionId+'" data-url="'+esc(link.url)+'" href="#">'+
     (canEdit?'<span class="drag-handle">'+dragSvg+'</span>':'')+
     favicon(link)+
     '<div class="link-info"><div class="link-title">'+title+'</div>'+
@@ -415,77 +407,95 @@ function bindLinks(container, tabId, canEdit, canDel) {
   });
 }
 
-// ── Drag & Drop sort — container-level delegation ──
+// ── Drag & Drop — pointer events with capture (works in Extension popups) ──
 function initDragDrop(container, tabId) {
-  let dragEl = null;
+  let drag = null;
+  // drag = { item, secId, secBlock, line, captureId, target, before }
 
-  container.addEventListener('dragstart', e => {
-    const item = e.target.closest('.link-item[draggable]');
-    if (!item) return;
-    dragEl = item;
-    dragEl.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', item.dataset.id);
-  });
-
-  container.addEventListener('dragend', () => {
-    if (dragEl) dragEl.classList.remove('dragging');
-    container.querySelectorAll('.drag-over').forEach(o => o.classList.remove('drag-over'));
-    dragEl = null;
-  });
-
-  container.addEventListener('dragover', e => {
-    e.preventDefault();
-    if (!dragEl) return;
-    const item = e.target.closest('.link-item[draggable]');
-    if (!item || item === dragEl || item.dataset.sec !== dragEl.dataset.sec) return;
-    container.querySelectorAll('.drag-over').forEach(o => o.classList.remove('drag-over'));
-    item.classList.add('drag-over');
-    e.dataTransfer.dropEffect = 'move';
-  });
-
-  container.addEventListener('dragleave', e => {
-    // Only remove drag-over if truly leaving the item (not moving to a child)
+  container.addEventListener('pointerdown', e => {
+    if (!e.target.closest('.drag-handle')) return;
     const item = e.target.closest('.link-item');
-    if (item && !item.contains(e.relatedTarget)) {
-      item.classList.remove('drag-over');
-    }
-  });
-
-  container.addEventListener('drop', async e => {
+    if (!item) return;
     e.preventDefault();
-    const target = e.target.closest('.link-item[draggable]');
-    if (!target || !dragEl || target === dragEl) return;
-    if (target.dataset.sec !== dragEl.dataset.sec) return;
-    target.classList.remove('drag-over');
-
-    const secId = parseInt(target.dataset.sec);
-    const secBlock = target.closest('.section-block');
+    const secId = parseInt(item.dataset.sec);
+    const secBlock = item.closest('.section-block');
     if (!secBlock) return;
 
-    // Insert before or after based on mouse Y position
-    const rect = target.getBoundingClientRect();
-    if (e.clientY < rect.top + rect.height / 2) target.before(dragEl);
-    else target.after(dragEl);
+    // Drop indicator line
+    const line = document.createElement('div');
+    line.className = 'drop-line';
 
-    // Collect new ID order from DOM
+    drag = { item, secId, secBlock, line, pointerId: e.pointerId, dropTarget: null, dropBefore: true };
+    item.classList.add('dragging');
+    item.after(line);
+
+    // Capture keeps pointermove firing even if pointer leaves popup bounds
+    try { item.setPointerCapture(e.pointerId); } catch {}
+  }, { passive: false });
+
+  container.addEventListener('pointermove', e => {
+    if (!drag) return;
+    e.preventDefault();
+
+    // Hide dragging element temporarily to hit-test what's underneath
+    drag.item.style.visibility = 'hidden';
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    drag.item.style.visibility = '';
+    if (!under) return;
+
+    const target = under.closest('.link-item');
+    if (!target || target === drag.item || target.dataset.sec !== String(drag.secId)) return;
+
+    const rect = target.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+
+    drag.dropTarget = target;
+    drag.dropBefore = before;
+
+    // Move the indicator line
+    if (before) target.before(drag.line);
+    else target.after(drag.line);
+    drag.line.style.display = 'block';
+  }, { passive: false });
+
+  const finish = async e => {
+    if (!drag) return;
+    const { item, secId, secBlock, line, dropTarget, dropBefore } = drag;
+    drag = null;
+
+    item.classList.remove('dragging');
+    item.style.visibility = '';
+
+    // Insert at new position
+    if (dropTarget) {
+      if (dropBefore) dropTarget.before(item);
+      else dropTarget.after(item);
+    }
+    line.remove();
+
+    if (!dropTarget) return; // no movement
+
     const newOrder = [...secBlock.querySelectorAll('.link-item')]
       .map(i => parseInt(i.dataset.id)).filter(Boolean);
 
-    // Update local state
     S.links[secId] = newOrder
       .map(id => (S.links[secId]||[]).find(l => l.id === id))
       .filter(Boolean);
 
-    // Persist to API
     try {
       await apiPut('/sections/' + secId + '/links/sort', { ids: newOrder });
       const { cache } = await chrome.storage.local.get(['cache']);
-      if (cache) {
-        cache.links[secId] = S.links[secId];
-        await chrome.storage.local.set({ cache });
-      }
-    } catch(err) { console.warn('Sort save failed:', err.message); }
+      if (cache) { cache.links[secId] = S.links[secId]; await chrome.storage.local.set({ cache }); }
+    } catch(err) { console.warn('[LinkPortal] sort save failed:', err.message); }
+  };
+
+  container.addEventListener('pointerup',     finish);
+  container.addEventListener('pointercancel', e => {
+    if (!drag) return;
+    drag.item.classList.remove('dragging');
+    drag.item.style.visibility = '';
+    drag.line.remove();
+    drag = null;
   });
 }
 

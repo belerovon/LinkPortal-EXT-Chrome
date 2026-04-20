@@ -14,20 +14,29 @@ chrome.runtime.onStartup.addListener(() => {
   scheduleAlarm();
 });
 
-// ── Restore toolbar icon from cached pixel data ──
+// ── Restore toolbar icon from cached logo data URL ──
+// Uses OffscreenCanvas + createImageBitmap — both available in Chrome service workers
 async function restoreIcon() {
   try {
-    const { logoPixels } = await chrome.storage.local.get(['logoPixels']);
-    if (!logoPixels) return;
+    const { logoDataUrl } = await chrome.storage.local.get(['logoDataUrl']);
+    if (!logoDataUrl || !logoDataUrl.startsWith('data:image/png')) return;
+
+    // Fetch the stored data URL as a blob
+    const res  = await fetch(logoDataUrl);
+    const blob = await res.blob();
+    const bmp  = await createImageBitmap(blob);
+
     const imageData = {};
-    for (const [sz, pixels] of Object.entries(logoPixels)) {
-      const size = parseInt(sz);
-      // ImageData is available in Chrome service workers
-      imageData[size] = new ImageData(new Uint8ClampedArray(pixels), size, size);
+    for (const sz of [16, 48]) {
+      const oc  = new OffscreenCanvas(sz, sz);
+      const ctx = oc.getContext('2d');
+      ctx.drawImage(bmp, 0, 0, sz, sz);
+      imageData[sz] = ctx.getImageData(0, 0, sz, sz);
     }
     await chrome.action.setIcon({ imageData });
   } catch (e) {
-    console.warn('[LinkPortal] restoreIcon failed:', e.message);
+    // Silently fail — default icon will show
+    console.warn('[LinkPortal] restoreIcon:', e.message);
   }
 }
 
