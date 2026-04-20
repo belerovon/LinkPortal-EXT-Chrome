@@ -8,7 +8,28 @@ const SYNC_MINUTES      = 30;
 const MAX_INACTIVE_DAYS = 30;
 
 chrome.runtime.onInstalled.addListener(() => scheduleAlarm());
-chrome.runtime.onStartup.addListener(() => { checkExpiry(); scheduleAlarm(); });
+chrome.runtime.onStartup.addListener(() => {
+  restoreIcon();
+  checkExpiry();
+  scheduleAlarm();
+});
+
+// ── Restore toolbar icon from cached pixel data ──
+async function restoreIcon() {
+  try {
+    const { logoPixels } = await chrome.storage.local.get(['logoPixels']);
+    if (!logoPixels) return;
+    const imageData = {};
+    for (const [sz, pixels] of Object.entries(logoPixels)) {
+      const size = parseInt(sz);
+      // ImageData is available in Chrome service workers
+      imageData[size] = new ImageData(new Uint8ClampedArray(pixels), size, size);
+    }
+    await chrome.action.setIcon({ imageData });
+  } catch (e) {
+    console.warn('[LinkPortal] restoreIcon failed:', e.message);
+  }
+}
 
 function scheduleAlarm() {
   chrome.alarms.get(ALARM_NAME, alarm => {

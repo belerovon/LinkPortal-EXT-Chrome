@@ -61,7 +61,6 @@ function applyLang() {
     $('s-lbl-theme-auto').textContent   = t('theme_auto')||'Auto';
     $('s-lbl-theme-dark').textContent   = t('theme_dark')||'Dunkel';
     // Settings
-    $('s-back-lbl').textContent      = t('settings_back');
     $('s-title-lbl').textContent     = t('settings_title');
     $('s-lbl-conn').textContent      = t('lbl_connection');
     $('s-lbl-url').textContent       = t('lbl_url');
@@ -164,20 +163,28 @@ async function loadBranding() {
         $('portal-logo').src = dataUrl;
         $('portal-logo').style.display = '';
         $('default-icon').style.display = 'none';
-        await chrome.storage.local.set({ logoDataUrl: dataUrl, logoSrc: base+'/img/logo.'+ext });
-        // Also set Chrome toolbar icon for PNG
+        await chrome.storage.local.set({ logoDataUrl: dataUrl });
+
+        // For PNG: build pixel arrays at 16 and 48px so background.js
+        // can restore the toolbar icon without needing canvas/DOM
         if(ext === 'png') {
           const img = new Image();
-          img.onload = () => {
+          img.onload = async () => {
             try {
-              const d = {};
-              for(const sz of [16,48]) {
+              const iconData = {};
+              const pixelArrays = {};
+              for(const sz of [16, 48]) {
                 const c = document.createElement('canvas');
                 c.width = c.height = sz;
-                c.getContext('2d').drawImage(img,0,0,sz,sz);
-                d[sz] = c.getContext('2d').getImageData(0,0,sz,sz);
+                const ctx = c.getContext('2d');
+                ctx.drawImage(img, 0, 0, sz, sz);
+                const id = ctx.getImageData(0, 0, sz, sz);
+                iconData[sz] = id;
+                // Store as plain array so service worker can reconstruct ImageData
+                pixelArrays[sz] = Array.from(id.data);
               }
-              chrome.action.setIcon({imageData:d}).catch(()=>{});
+              chrome.action.setIcon({ imageData: iconData }).catch(()=>{});
+              await chrome.storage.local.set({ logoPixels: pixelArrays });
             } catch {}
           };
           img.src = dataUrl;
@@ -408,64 +415,77 @@ function bindLinks(container, tabId, canEdit, canDel) {
   });
 }
 
-// ── Drag & Drop sort ──
+// ── Drag & Drop sort — container-level delegation ──
 function initDragDrop(container, tabId) {
   let dragEl = null;
-  container.querySelectorAll('.link-item[draggable]').forEach(el => {
-    el.addEventListener('dragstart', e => {
-      dragEl = el;
-      S.dragSrcId = parseInt(el.dataset.id);
-      S.dragSrcSecId = parseInt(el.dataset.sec);
-      el.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    el.addEventListener('dragend', () => {
-      el.classList.remove('dragging');
-      container.querySelectorAll('.drag-over').forEach(o=>o.classList.remove('drag-over'));
-      dragEl = null;
-    });
-    el.addEventListener('dragover', e => {
-      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-      // Only within same section
-      if(dragEl && el !== dragEl && el.dataset.sec === dragEl.dataset.sec) {
-        container.querySelectorAll('.drag-over').forEach(o=>o.classList.remove('drag-over'));
-        el.classList.add('drag-over');
+
+  container.addEventListener('dragstart', e => {
+    const item = e.target.closest('.link-item[draggable]');
+    if (!item) return;
+    dragEl = item;
+    dragEl.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', item.dataset.id);
+  });
+
+  container.addEventListener('dragend', () => {
+    if (dragEl) dragEl.classList.remove('dragging');
+    container.querySelectorAll('.drag-over').forEach(o => o.classList.remove('drag-over'));
+    dragEl = null;
+  });
+
+  container.addEventListener('dragover', e => {
+    e.preventDefault();
+    if (!dragEl) return;
+    const item = e.target.closest('.link-item[draggable]');
+    if (!item || item === dragEl || item.dataset.sec !== dragEl.dataset.sec) return;
+    container.querySelectorAll('.drag-over').forEach(o => o.classList.remove('drag-over'));
+    item.classList.add('drag-over');
+    e.dataTransfer.dropEffect = 'move';
+  });
+
+  container.addEventListener('dragleave', e => {
+    // Only remove drag-over if truly leaving the item (not moving to a child)
+    const item = e.target.closest('.link-item');
+    if (item && !item.contains(e.relatedTarget)) {
+      item.classList.remove('drag-over');
+    }
+  });
+
+  container.addEventListener('drop', async e => {
+    e.preventDefault();
+    const target = e.target.closest('.link-item[draggable]');
+    if (!target || !dragEl || target === dragEl) return;
+    if (target.dataset.sec !== dragEl.dataset.sec) return;
+    target.classList.remove('drag-over');
+
+    const secId = parseInt(target.dataset.sec);
+    const secBlock = target.closest('.section-block');
+    if (!secBlock) return;
+
+    // Insert before or after based on mouse Y position
+    const rect = target.getBoundingClientRect();
+    if (e.clientY < rect.top + rect.height / 2) target.before(dragEl);
+    else target.after(dragEl);
+
+    // Collect new ID order from DOM
+    const newOrder = [...secBlock.querySelectorAll('.link-item')]
+      .map(i => parseInt(i.dataset.id)).filter(Boolean);
+
+    // Update local state
+    S.links[secId] = newOrder
+      .map(id => (S.links[secId]||[]).find(l => l.id === id))
+      .filter(Boolean);
+
+    // Persist to API
+    try {
+      await apiPut('/sections/' + secId + '/links/sort', { ids: newOrder });
+      const { cache } = await chrome.storage.local.get(['cache']);
+      if (cache) {
+        cache.links[secId] = S.links[secId];
+        await chrome.storage.local.set({ cache });
       }
-    });
-    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
-    el.addEventListener('drop', async e => {
-      e.preventDefault();
-      el.classList.remove('drag-over');
-      if(!dragEl || el === dragEl) return;
-      if(el.dataset.sec !== dragEl.dataset.sec) return; // different section, skip
-
-      const secId = parseInt(el.dataset.sec);
-      const secBlock = container.querySelector('.section-block[data-sec-id="'+secId+'"]');
-      if(!secBlock) return;
-
-      // Reorder DOM
-      const items = [...secBlock.querySelectorAll('.link-item')];
-      const fromIdx = items.indexOf(dragEl);
-      const toIdx   = items.indexOf(el);
-      if(fromIdx < 0 || toIdx < 0) return;
-
-      if(fromIdx < toIdx) el.after(dragEl);
-      else el.before(dragEl);
-
-      // Collect new order
-      const newOrder = [...secBlock.querySelectorAll('.link-item')].map(i=>parseInt(i.dataset.id));
-
-      // Update local state
-      S.links[secId] = newOrder.map(id => S.links[secId].find(l=>l.id===id)).filter(Boolean);
-
-      // Save to API
-      try {
-        await apiPut('/sections/'+secId+'/links/sort', {ids: newOrder});
-        // Refresh cache
-        const {cache} = await chrome.storage.local.get(['cache']);
-        if(cache) { cache.links[secId]=S.links[secId]; await chrome.storage.local.set({cache}); }
-      } catch(err) { console.warn('Sort failed:', err.message); }
-    });
+    } catch(err) { console.warn('Sort save failed:', err.message); }
   });
 }
 
