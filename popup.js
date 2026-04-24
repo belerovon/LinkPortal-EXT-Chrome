@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════
-   LinkPortal Extension — popup.js  v1.5.1
+   LinkPortal Extension — popup.js  v1.5.2
    ═══════════════════════════════════════════════════════════ */
 
-const VERSION = '1.5.1';
+const VERSION = '1.5.2';
 const MAX_INACTIVE_DAYS = 30;
 
 // ── 403 Threshold: 3 failures within 5 minutes triggers logout ──
@@ -343,8 +343,19 @@ async function loadData(force=false) {
 }
 
 async function bgRefresh() {
-  try{applyData(await fetchFromApi());clear403();$('cache-badge').style.display='none';
-    if(S.activeTab)renderTabContent(S.activeTab);}
+  try{
+    applyData(await fetchFromApi());
+    clear403();
+    $('cache-badge').style.display='none';
+    if(S.activeTab) renderTabContent(S.activeTab);
+    renderTabBar();
+    // Re-check language from storage (background sync may have updated it)
+    const {lang} = await chrome.storage.local.get(['lang']);
+    if(lang && lang !== _lang && I18N[lang]) {
+      setLang(lang);
+      applyLang();
+    }
+  }
   catch(e){if(e.status===403){if(await record403())await doLogout('403');}}
 }
 
@@ -371,14 +382,14 @@ function renderTabBar() {
   const label = $('active-tab-label');
   label.textContent = (activeTab?.icon ? activeTab.icon+' ' : '') + (activeTab?.title||'');
 
-  // Add-link button: show if any link-type section in any tab is editable
+  // Add-link: show if user can_create in any link-type section
   const canAdd = S.tabs.some(tab => {
     const tp = S.perms[tab.id]||{};
-    if(tp.can_edit) return true;
-    // Also check section-level perms
-    return (S.sections[tab.id]||[]).some(sec =>
-      sec.section_type === 'links' && (sec.perms||{}).can_edit
-    );
+    return (S.sections[tab.id]||[]).some(sec => {
+      if(sec.section_type && sec.section_type !== 'links') return false;
+      const sp = sec.sec_perms || sec.perms || null;
+      return sp ? (sp.can_create||sp.can_edit||false) : (tp.can_edit||false);
+    });
   });
   const addBtn = $('tab-add-btn');
   addBtn.style.display = canAdd ? '' : 'none';
@@ -400,7 +411,7 @@ function openTabsDropdown() {
     btn.addEventListener('click', () => {
       S.activeTab = parseInt(btn.dataset.id);
       chrome.storage.local.set({ lastActiveTab: S.activeTab });
-      nav.style.display = 'none'; chevron.classList.remove('open');
+      dropdown.style.display = 'none'; chevron.classList.remove('open');
       clearSearch(); renderTabBar(); renderTabContent(S.activeTab);
     });
   });
@@ -412,39 +423,35 @@ function renderTabContent(tabId) {
   const content = $('tab-content');
   const secs = S.sections[tabId]||[];
   const tabPerm = S.perms[tabId]||{};
-  // Tab-level fallbacks (section perms override if present)
-  const tabEdit = tabPerm.can_edit||false;
-  const tabDel  = tabPerm.can_delete||false;
   let html='', has=false;
   for(let i=0;i<secs.length;i++){
     const sec=secs[i], lnks=S.links[sec.id]||[];
     if(!lnks.length) continue;
     has=true;
-    // Section-level perms override tab-level if present
-    const secPerm = sec.perms || {};
-    const canEdit = ('can_edit'   in secPerm) ? secPerm.can_edit   : tabEdit;
-    const canDel  = ('can_delete' in secPerm) ? secPerm.can_delete : tabDel;
+    // API returns sec_perms (section-level) — fallback to tab perms if absent
+    const sp = sec.sec_perms || sec.perms || null;
+    const canCreate = sp ? (sp.can_create||false) : (tabPerm.can_edit||false);
+    const canEdit   = sp ? (sp.can_edit  ||false) : (tabPerm.can_edit  ||false);
+    const canDel    = sp ? (sp.can_delete||false) : (tabPerm.can_delete||false);
     if(i>0) html+='<div class="section-divider"></div>';
-    // Section count is a button to open all links
     html+='<div class="section-block" data-sec-id="'+sec.id+'">' +
       '<div class="section-header">'+
       (sec.icon?'<span class="section-icon">'+sec.icon+'</span>':'')+
       '<span class="section-title">'+esc(sec.title)+'</span>'+
-      '<button class="section-count" data-sec-id="'+sec.id+'" title="Alle Links öffnen">'+lnks.length+'</button>'+
+      '<button class="section-count" data-sec-id="'+sec.id+'" title="'+t('open_all_links')+'">'+lnks.length+'</button>'+
       '</div>'+
       lnks.map(l=>linkHtml({...l, sectionId:sec.id}, canEdit, canDel)).join('')+'</div>';
   }
   content.innerHTML = has ? html :
     '<div class="empty-tab"><div class="empty-icon">📭</div><p>'+t('no_links')+'</p></div>';
-  bindLinks(content, tabId, tabEdit, tabDel);
+  bindLinks(content, tabId);
 
   // Section count: open all links in section
   content.querySelectorAll('.section-count[data-sec-id]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const secId = parseInt(btn.dataset.secId);
-      const lnks = S.links[secId]||[];
-      lnks.forEach(l => chrome.tabs.create({url: l.url, active: false}));
+      (S.links[secId]||[]).forEach(l => chrome.tabs.create({url: l.url, active: false}));
     });
   });
 }
@@ -484,7 +491,7 @@ function favicon(link) {
   } catch { return '<div class="link-favicon-fallback">'+ini(link.title)+'</div>'; }
 }
 
-function bindLinks(container, tabId, canEdit, canDel) {
+function bindLinks(container, tabId) {
   container.querySelectorAll('.link-item').forEach(el => {
     el.addEventListener('click', e => {
       if(e.target.closest('.link-action-btn')||e.target.closest('.drag-handle')) return;
@@ -493,13 +500,13 @@ function bindLinks(container, tabId, canEdit, canDel) {
     el.querySelector('.open-btn')?.addEventListener('click', e => {
       e.preventDefault(); e.stopPropagation(); chrome.tabs.create({url:el.dataset.url});
     });
-    if(canEdit) el.querySelector('.edit-btn')?.addEventListener('click', e => {
+    el.querySelector('.edit-btn')?.addEventListener('click', e => {
       e.preventDefault(); e.stopPropagation();
       const id=parseInt(el.dataset.id);
       const link=S.allLinks.find(l=>l.id===id);
       if(link) openLinkDialog(link,tabId);
     });
-    if(canDel) el.querySelector('.del')?.addEventListener('click', e => {
+    el.querySelector('.del')?.addEventListener('click', e => {
       e.preventDefault(); e.stopPropagation(); deleteLink(parseInt(el.dataset.id), tabId);
     });
   });
@@ -625,9 +632,9 @@ function openLinkDialog(link, tabId) {
     const tp = S.perms[tab.id]||{};
     for(const sec of (S.sections[tab.id]||[])){
       if(sec.section_type && sec.section_type !== 'links') continue;
-      // Section editable if section-level or tab-level grants it
-      const secEdit = ('can_edit' in (sec.perms||{})) ? sec.perms.can_edit : tp.can_edit;
-      if(!secEdit) continue;
+      const sp = sec.sec_perms || sec.perms || null;
+      const secCreate = sp ? (sp.can_create||sp.can_edit||false) : (tp.can_edit||false);
+      if(!secCreate) continue;
       const opt=document.createElement('option');
       opt.value=sec.id; opt.textContent=tab.title+' › '+sec.title;
       if(link&&link.sectionId===sec.id) opt.selected=true;
