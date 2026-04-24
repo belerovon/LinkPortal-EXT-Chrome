@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════
-   LinkPortal Extension — popup.js  v1.5.2
+   LinkPortal Extension — popup.js  v1.5.3
    ═══════════════════════════════════════════════════════════ */
 
-const VERSION = '1.5.2';
+const VERSION = '1.5.3';
 const MAX_INACTIVE_DAYS = 30;
 
 // ── 403 Threshold: 3 failures within 5 minutes triggers logout ──
@@ -342,6 +342,35 @@ async function loadData(force=false) {
   }
 }
 
+// ── Fetch language preference from portal (tries /auth/me then /settings) ──
+async function syncLangFromPortal() {
+  if(!S.baseUrl || !S.token) return;
+  let portalLang = null;
+  // Try /auth/me
+  try {
+    const me = await apiGet('/auth/me');
+    const candidate = me.language || me.language_code || me.lang || me.preferred_language;
+    if(candidate && I18N[candidate]) portalLang = candidate;
+  } catch {}
+  // Fallback: GET /settings (same endpoint we PUT to)
+  if(!portalLang) {
+    try {
+      const settings = await apiGet('/settings');
+      const candidate = settings.language || settings.language_code || settings.lang;
+      if(candidate && I18N[candidate]) portalLang = candidate;
+    } catch {}
+  }
+  // Apply only if different from current
+  if(portalLang && portalLang !== _lang) {
+    console.log(`[LP] lang portal=${portalLang} local=${_lang} → applying`);
+    setLang(portalLang);
+    await chrome.storage.local.set({ lang: portalLang });
+    applyLang();
+    if($('dd-lang-sel')) $('dd-lang-sel').value = portalLang;
+    if($('s-lang')) $('s-lang').value = portalLang;
+  }
+}
+
 async function bgRefresh() {
   try{
     applyData(await fetchFromApi());
@@ -349,12 +378,8 @@ async function bgRefresh() {
     $('cache-badge').style.display='none';
     if(S.activeTab) renderTabContent(S.activeTab);
     renderTabBar();
-    // Re-check language from storage (background sync may have updated it)
-    const {lang} = await chrome.storage.local.get(['lang']);
-    if(lang && lang !== _lang && I18N[lang]) {
-      setLang(lang);
-      applyLang();
-    }
+    // Always fetch lang from portal directly — don't rely on stale storage
+    await syncLangFromPortal();
   }
   catch(e){if(e.status===403){if(await record403())await doLogout('403');}}
 }
@@ -916,19 +941,24 @@ async function init(){
 
   loadBranding(); // non-blocking
   await loadData();
-
-  // Sync lang from portal (best-effort, keep English on fail)
-  try{
-    const me=await apiGet('/auth/me');
-    if(me.language&&I18N[me.language]&&me.language!==_lang){
-      await changeLang(me.language);
-    }
-  }catch{}
+  // lang sync happens inside bgRefresh() / syncLangFromPortal()
 }
 
 document.addEventListener('DOMContentLoaded',()=>{
   initGlobalDnD(); // one-time global DnD — must be first
   watchSettingsFields();
+
+  // React immediately when background sync updates the language
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if(area === 'local' && changes.lang) {
+      const newLang = changes.lang.newValue;
+      if(newLang && I18N[newLang] && newLang !== _lang) {
+        setLang(newLang); applyLang();
+        if($('dd-lang-sel')) $('dd-lang-sel').value = newLang;
+        if($('s-lang')) $('s-lang').value = newLang;
+      }
+    }
+  });
 
   // Setup/Logout buttons
   $('btn-open-settings').addEventListener('click',openSettings);

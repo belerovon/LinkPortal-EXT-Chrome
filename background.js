@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════
-   LinkPortal Extension — background.js  v1.5.2
+   LinkPortal Extension — background.js  v1.5.3
    Basic Auth · Periodic Sync · 30-day Logout
    ════════════════════════════════════════════════════ */
 
@@ -113,8 +113,9 @@ async function syncInBackground() {
       });
       if (meRes.ok) {
         const me = await meRes.json();
-        if (me.language && ['de','en','es'].includes(me.language)) {
-          await chrome.storage.local.set({ lang: me.language });
+        const lang = me.language || me.language_code || me.lang || me.preferred_language;
+        if (lang && ['de','en','es'].includes(lang)) {
+          await chrome.storage.local.set({ lang });
         }
       }
     } catch {}
@@ -178,8 +179,9 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
       });
       if (meRes.ok) {
         const me = await meRes.json();
-        if (me.language && ['de','en','es'].includes(me.language)) {
-          await chrome.storage.local.set({ lang: me.language });
+        const lang = me.language || me.language_code || me.lang || me.preferred_language;
+        if (lang && ['de','en','es'].includes(lang)) {
+          await chrome.storage.local.set({ lang });
         }
       }
     } catch {}
