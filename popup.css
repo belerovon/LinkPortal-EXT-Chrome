@@ -1,4 +1,4 @@
-/* LinkPortal Extension — popup.css v1.5.0 */
+/* LinkPortal Extension — popup.css v1.5.1 */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
@@ -292,3 +292,22 @@ mark{background:rgba(78,127,242,0.25);color:var(--accent);border-radius:2px;padd
 .ext-id-code{flex:1;font-family:monospace;font-size:10.5px;color:var(--text-muted);
   background:var(--bg3);padding:6px 10px;border-radius:var(--rs);
   border:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Settings version bar ── */
+.settings-version-bar{background:var(--bg2);border-top:1px solid var(--border);
+  padding:6px 13px;flex-shrink:0}
+.settings-version-btn{border:none;background:transparent;color:var(--text-dim);
+  font-family:var(--font);font-size:10.5px;font-weight:600;cursor:pointer;
+  letter-spacing:.3px;padding:2px 0;transition:color .12s}
+.settings-version-btn:hover{color:var(--accent)}
+.extid-collapse{margin-top:6px}
+.ext-id-row{display:flex;align-items:center;gap:8px}
+.ext-id-code{flex:1;font-family:monospace;font-size:10.5px;color:var(--text-muted);
+  background:var(--bg3);padding:5px 8px;border-radius:var(--rs);
+  border:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Section count clickable ── */
+.section-count{margin-left:auto;font-size:10px;color:var(--text-dim);
+  background:var(--bg3);padding:1px 6px;border-radius:10px;
+  cursor:pointer;transition:background .12s,color .12s;border:none;font-family:var(--font)}
+.section-count:hover{background:rgba(78,127,242,0.2);color:var(--accent)}

@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════
-   LinkPortal Extension — popup.js  v1.5.0
+   LinkPortal Extension — popup.js  v1.5.1
    ═══════════════════════════════════════════════════════════ */
 
-const VERSION = '1.5.0';
+const VERSION = '1.5.1';
 const MAX_INACTIVE_DAYS = 30;
 
 // ── 403 Threshold: 3 failures within 5 minutes triggers logout ──
@@ -73,6 +73,7 @@ function applyLang() {
     $('dd-lbl-settings').textContent = t('menu_settings');
     $('dd-version').textContent      = ver;
     $('dd-lang-sel').value           = _lang;
+    if($('s-version-btn')) $('s-version-btn').textContent = ver;
     // Settings — theme
     $('s-lbl-theme-title').textContent  = t('menu_theme')||'Design';
     $('s-lbl-theme-light').textContent  = t('theme_light')||'Hell';
@@ -348,14 +349,19 @@ async function bgRefresh() {
 }
 
 // ── Render ──
-function renderAll() {
+async function renderAll() {
   if(!S.tabs.length){
     $('tabs-bar').style.display='none';
     $('tab-content').innerHTML='<div class="empty-tab"><div class="empty-icon">🔒</div><p>'+t('no_tabs')+'</p></div>';
     return;
   }
   $('tabs-bar').style.display='';
-  if(!S.activeTab||!S.tabs.find(t2=>t2.id===S.activeTab)) S.activeTab=S.tabs[0].id;
+  // Restore last active tab from storage, fall back to first
+  if(!S.activeTab || !S.tabs.find(t2=>t2.id===S.activeTab)) {
+    const { lastActiveTab } = await chrome.storage.local.get(['lastActiveTab']);
+    const restored = lastActiveTab && S.tabs.find(t2=>t2.id===lastActiveTab);
+    S.activeTab = restored ? lastActiveTab : S.tabs[0].id;
+  }
   renderTabBar(); renderTabContent(S.activeTab);
 }
 
@@ -365,8 +371,15 @@ function renderTabBar() {
   const label = $('active-tab-label');
   label.textContent = (activeTab?.icon ? activeTab.icon+' ' : '') + (activeTab?.title||'');
 
-  // Add-link button: show if any tab has edit perms
-  const canAdd = S.tabs.some(tab=>(S.perms[tab.id]||{}).can_edit);
+  // Add-link button: show if any link-type section in any tab is editable
+  const canAdd = S.tabs.some(tab => {
+    const tp = S.perms[tab.id]||{};
+    if(tp.can_edit) return true;
+    // Also check section-level perms
+    return (S.sections[tab.id]||[]).some(sec =>
+      sec.section_type === 'links' && (sec.perms||{}).can_edit
+    );
+  });
   const addBtn = $('tab-add-btn');
   addBtn.style.display = canAdd ? '' : 'none';
   addBtn.textContent = t('btn_add_link');
@@ -386,7 +399,8 @@ function openTabsDropdown() {
   dropdown.querySelectorAll('.tab-drop-item').forEach(btn => {
     btn.addEventListener('click', () => {
       S.activeTab = parseInt(btn.dataset.id);
-      dropdown.style.display = 'none'; chevron.classList.remove('open');
+      chrome.storage.local.set({ lastActiveTab: S.activeTab });
+      nav.style.display = 'none'; chevron.classList.remove('open');
       clearSearch(); renderTabBar(); renderTabContent(S.activeTab);
     });
   });
@@ -398,22 +412,41 @@ function renderTabContent(tabId) {
   const content = $('tab-content');
   const secs = S.sections[tabId]||[];
   const tabPerm = S.perms[tabId]||{};
-  const canEdit = tabPerm.can_edit||false, canDel = tabPerm.can_delete||false;
+  // Tab-level fallbacks (section perms override if present)
+  const tabEdit = tabPerm.can_edit||false;
+  const tabDel  = tabPerm.can_delete||false;
   let html='', has=false;
   for(let i=0;i<secs.length;i++){
     const sec=secs[i], lnks=S.links[sec.id]||[];
     if(!lnks.length) continue;
     has=true;
+    // Section-level perms override tab-level if present
+    const secPerm = sec.perms || {};
+    const canEdit = ('can_edit'   in secPerm) ? secPerm.can_edit   : tabEdit;
+    const canDel  = ('can_delete' in secPerm) ? secPerm.can_delete : tabDel;
     if(i>0) html+='<div class="section-divider"></div>';
-    html+='<div class="section-block" data-sec-id="'+sec.id+'"><div class="section-header">'+
+    // Section count is a button to open all links
+    html+='<div class="section-block" data-sec-id="'+sec.id+'">' +
+      '<div class="section-header">'+
       (sec.icon?'<span class="section-icon">'+sec.icon+'</span>':'')+
       '<span class="section-title">'+esc(sec.title)+'</span>'+
-      '<span class="section-count">'+lnks.length+'</span></div>'+
+      '<button class="section-count" data-sec-id="'+sec.id+'" title="Alle Links öffnen">'+lnks.length+'</button>'+
+      '</div>'+
       lnks.map(l=>linkHtml({...l, sectionId:sec.id}, canEdit, canDel)).join('')+'</div>';
   }
   content.innerHTML = has ? html :
     '<div class="empty-tab"><div class="empty-icon">📭</div><p>'+t('no_links')+'</p></div>';
-  bindLinks(content, tabId, canEdit, canDel);
+  bindLinks(content, tabId, tabEdit, tabDel);
+
+  // Section count: open all links in section
+  content.querySelectorAll('.section-count[data-sec-id]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const secId = parseInt(btn.dataset.secId);
+      const lnks = S.links[secId]||[];
+      lnks.forEach(l => chrome.tabs.create({url: l.url, active: false}));
+    });
+  });
 }
 
 // ── Link HTML ──
@@ -589,9 +622,12 @@ function openLinkDialog(link, tabId) {
   const secSel=$('dlg-sec'); secSel.innerHTML='';
   let hasOptions=false;
   for(const tab of S.tabs){
-    if(!(S.perms[tab.id]||{}).can_edit) continue;
+    const tp = S.perms[tab.id]||{};
     for(const sec of (S.sections[tab.id]||[])){
       if(sec.section_type && sec.section_type !== 'links') continue;
+      // Section editable if section-level or tab-level grants it
+      const secEdit = ('can_edit' in (sec.perms||{})) ? sec.perms.can_edit : tp.can_edit;
+      if(!secEdit) continue;
       const opt=document.createElement('option');
       opt.value=sec.id; opt.textContent=tab.title+' › '+sec.title;
       if(link&&link.sectionId===sec.id) opt.selected=true;
@@ -653,11 +689,6 @@ function showDlgErr(msg){$('dlg-err').style.display='';$('dlg-err').textContent=
 // ══════════════════════════════════════════
 async function openSettings() {
   closeDropdown();
-  // Show extension ID
-  try {
-    const id = chrome.runtime.id || '–';
-    $('s-ext-id').textContent = id;
-  } catch {}
   const stored=await chrome.storage.sync.get(['baseUrl','token','username']);
   $('s-base-url').value  = stored.baseUrl||'';
   $('s-username').value  = stored.username||'';
@@ -688,13 +719,33 @@ function updateSaveBtn(){
 }
 
 function watchSettingsFields(){
+  let autoTestTimer = null;
+
+  function maybeAutoTest() {
+    const url   = $('s-base-url').value.trim();
+    const user  = $('s-username').value.trim();
+    const token = S.tokenSaved ? '(saved)' : $('s-api-token').value.trim();
+    if(!url || !user || !token) return;
+    if(!url.startsWith('https://')) return;
+    // All fields filled — auto-test after 600ms debounce
+    clearTimeout(autoTestTimer);
+    autoTestTimer = setTimeout(() => {
+      if(!S.testPassed) testConnection();
+    }, 600);
+  }
+
   ['s-base-url','s-username'].forEach(id=>{
     $(id)?.addEventListener('input',()=>{
       if($('s-base-url').value.trim()!==S.lastTestedUrl||$('s-username').value.trim()!==S.lastTestedUser) S.testPassed=false;
       updateSaveBtn();
+      maybeAutoTest();
     });
   });
-  $('s-api-token')?.addEventListener('input',()=>{if(!S.tokenSaved){S.testPassed=false;}updateSaveBtn();});
+  $('s-api-token')?.addEventListener('input',()=>{
+    if(!S.tokenSaved){ S.testPassed=false; }
+    updateSaveBtn();
+    maybeAutoTest();
+  });
 }
 
 async function testConnection(){
@@ -882,6 +933,14 @@ document.addEventListener('DOMContentLoaded',()=>{
     $('btn-refresh').classList.remove('spinning');
   });
 
+  // Logo + title → open portal
+  ['portal-logo','portal-title','default-icon'].forEach(id => {
+    $(id)?.addEventListener('click', () => { if(S.baseUrl) chrome.tabs.create({url:S.baseUrl}); });
+  });
+  $('portal-title').style.cursor = 'pointer';
+  $('portal-logo').style.cursor  = 'pointer';
+  $('default-icon').style.cursor = 'pointer';
+
   // Dropdown
   $('btn-menu').addEventListener('click',e=>{e.stopPropagation();openDropdown();});
   $('dd-settings').addEventListener('click',openSettings);
@@ -912,6 +971,16 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   // Settings panel
   $('btn-settings-back').addEventListener('click',closeSettings);
+  // Version click → toggle extension ID
+  $('s-version-btn')?.addEventListener('click', () => {
+    const col = $('s-extid-collapse');
+    const show = col.style.display === 'none';
+    col.style.display = show ? '' : 'none';
+    if(show) {
+      const id = chrome.runtime.id || '—';
+      $('s-ext-id').textContent = id;
+    }
+  });
   $('s-btn-copy-id')?.addEventListener('click', () => {
     const id = $('s-ext-id').textContent;
     navigator.clipboard.writeText(id).then(() => {

@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════
-   LinkPortal Extension — background.js  v1.5.0
+   LinkPortal Extension — background.js  v1.5.1
    Basic Auth · Periodic Sync · 30-day Logout
    ════════════════════════════════════════════════════ */
 
@@ -104,8 +104,20 @@ async function syncInBackground() {
   try {
     const data = await fetchAllData(baseUrl, username, token);
     await chrome.storage.local.set({ cache: data, cacheTime: Date.now() });
-    // Successful — reset 403 counter
     await chrome.storage.local.remove(['err403']);
+    // Sync user language preference
+    try {
+      const meRes = await fetch(baseUrl.replace(/\/$/,'') + '/api/auth/me', {
+        headers: { 'Authorization': makeBasicAuth(username, token) },
+        credentials: 'omit'
+      });
+      if (meRes.ok) {
+        const me = await meRes.json();
+        if (me.language && ['de','en','es'].includes(me.language)) {
+          await chrome.storage.local.set({ lang: me.language });
+        }
+      }
+    } catch {}
   } catch (err) {
     if (err.status === 403 || (err.message||'').includes('403')) {
       if (await record403bg()) await performLogout('403');
@@ -157,8 +169,20 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
   }).then(async r => {
     if (!r.ok) { sendResponse({ ok: false, error: 'HTTP ' + r.status }); return; }
     await chrome.storage.sync.set({ baseUrl: baseUrl.replace(/\/$/,''), username, token });
-    // Clear stale cache so next popup open fetches fresh data
     await chrome.storage.local.remove(['cache', 'cacheTime']);
+    // Fetch user language preference and store it
+    try {
+      const meRes = await fetch(baseUrl.replace(/\/$/,'') + '/api/auth/me', {
+        headers: { 'Authorization': makeBasicAuth(username, token) },
+        credentials: 'omit'
+      });
+      if (meRes.ok) {
+        const me = await meRes.json();
+        if (me.language && ['de','en','es'].includes(me.language)) {
+          await chrome.storage.local.set({ lang: me.language });
+        }
+      }
+    } catch {}
     sendResponse({ ok: true, message: 'LinkPortal Extension erfolgreich konfiguriert!' });
   }).catch(err => sendResponse({ ok: false, error: err.message }));
 

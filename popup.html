@@ -42,7 +42,7 @@
             <option value="en">🇬🇧 English</option>
             <option value="es">🇪🇸 Español</option>
           </select>
-          <span class="dd-version" id="dd-version">v1.5.0</span>
+          <span class="dd-version" id="dd-version">v1.5.1</span>
         </div>
       </div>
     </div>
@@ -138,15 +138,6 @@
     <div class="settings-body">
 
       <div class="card">
-        <div class="card-title" id="s-lbl-extid-title">🔌 Extension ID</div>
-        <div class="ext-id-row">
-          <code id="s-ext-id" class="ext-id-code">…</code>
-          <button id="s-btn-copy-id" class="btn-tiny" id="s-btn-copy-id">📋</button>
-        </div>
-        <span class="field-hint" id="s-lbl-extid-hint">Diese ID wird im LinkPortal für die Auto-Konfiguration benötigt.</span>
-      </div>
-
-      <div class="card">
         <div class="card-title" id="s-lbl-conn"></div>
         <div class="field">
           <label class="label" id="s-lbl-url" for="s-base-url"></label>
@@ -237,6 +228,16 @@
         <button id="s-btn-save" class="btn btn-primary" disabled><span id="s-lbl-save"></span></button>
       </div>
     </footer>
+    <!-- Version + collapsible Extension ID below footer -->
+    <div class="settings-version-bar">
+      <button id="s-version-btn" class="settings-version-btn">v1.5.1</button>
+      <div id="s-extid-collapse" class="extid-collapse" style="display:none">
+        <div class="ext-id-row">
+          <code id="s-ext-id" class="ext-id-code">…</code>
+          <button id="s-btn-copy-id" class="btn-tiny">📋</button>
+        </div>
+      </div>
+    </div>
   </div>
 
 </div>
