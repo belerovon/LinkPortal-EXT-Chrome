@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════
-   LinkPortal Extension — popup.js  v1.5.3
+   LinkPortal Extension — popup.js  v1.5.4
    ═══════════════════════════════════════════════════════════ */
 
-const VERSION = '1.5.3';
+const VERSION = '1.5.4';
 const MAX_INACTIVE_DAYS = 30;
 
 // ── 403 Threshold: 3 failures within 5 minutes triggers logout ──
@@ -24,15 +24,13 @@ async function clear403() {
 }
 
 const S = {
-  baseUrl:'', token:'', username:'', lang:'en',
+  baseUrl:'', token:'', username:'',
   theme:'auto',
   tabs:[], sections:{}, links:{}, perms:{},
   portalTitle:'LinkPortal',
   activeTab:null, allLinks:[],
   tokenSaved:false, testPassed:false,
-  lastTestedUrl:'', lastTestedUser:'', lastTestedToken:'',
-  // DnD state
-  dragSrcId:null, dragSrcSecId:null,
+  lastTestedUrl:'', lastTestedUser:'',
 };
 
 const $ = id => document.getElementById(id);
@@ -41,6 +39,14 @@ const escRx = s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const ini = s => (s||'?').charAt(0).toUpperCase();
 const mkAuth = (u,t) => 'Basic ' + btoa(unescape(encodeURIComponent((u||'')+':'+(t||''))));
 const apiUrl = p => S.baseUrl.replace(/\/$/,'')+'/api'+p;
+
+// ── SVG icon constants (built once, reused everywhere) ──
+const SVG = {
+  open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+  del:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>',
+  drag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="18" x2="16" y2="18"/></svg>',
+};
 
 // ── Theme ──
 function applyTheme(theme) {
@@ -59,63 +65,57 @@ async function changeTheme(theme) {
 // ── Language ──
 function applyLang() {
   const ver = 'v'+VERSION;
-  try {
-    $('search-input').placeholder   = t('search_placeholder');
-    $('loading-text').textContent    = t('loading');
-    $('setup-title').textContent     = t('setup_title');
-    $('setup-desc').textContent      = t('setup_desc');
-    $('btn-open-settings').textContent = t('setup_btn');
-    $('btn-logout-settings').textContent = t('logout_btn');
-    $('error-title').textContent     = t('error_title');
-    $('btn-retry').textContent       = t('retry');
-    $('btn-refresh').title           = t('refresh');
-    $('dd-lbl-portal').textContent   = t('open_portal');
-    $('dd-lbl-settings').textContent = t('menu_settings');
-    $('dd-version').textContent      = ver;
-    $('dd-lang-sel').value           = _lang;
-    if($('s-version-btn')) $('s-version-btn').textContent = ver;
-    // Settings — theme
-    $('s-lbl-theme-title').textContent  = t('menu_theme')||'Design';
-    $('s-lbl-theme-light').textContent  = t('theme_light')||'Hell';
-    $('s-lbl-theme-auto').textContent   = t('theme_auto')||'Auto';
-    $('s-lbl-theme-dark').textContent   = t('theme_dark')||'Dunkel';
-    // Settings
-    $('s-title-lbl').textContent     = t('settings_title');
-    $('s-lbl-conn').textContent      = t('lbl_connection');
-    $('s-lbl-url').textContent       = t('lbl_url');
-    $('s-base-url').placeholder      = 'https://portal.example.com';
-    $('s-hint-url').textContent      = t('lbl_url_hint');
-    $('s-lbl-user').textContent      = t('lbl_user');
-    $('s-hint-user').textContent     = t('lbl_user_hint');
-    $('s-lbl-token').textContent     = t('lbl_token');
-    $('s-hint-token').textContent    = t('lbl_token_hint');
-    $('s-lbl-test-title').textContent= t('lbl_test');
-    $('s-lbl-test-btn').textContent  = t('btn_test');
-    $('s-lbl-sync-title').textContent= t('lbl_sync_section');
-    $('s-lbl-last-sync').textContent = t('lbl_last_sync');
-    $('s-lbl-auto').textContent      = t('lbl_auto_sync');
-    $('s-auto-val').textContent      = t('lbl_auto_val');
-    $('s-lbl-cached').textContent    = t('lbl_cached');
-    $('s-lbl-sync-now').textContent  = t('btn_sync_now');
-    $('s-lbl-clear').textContent     = t('btn_clear_cache');
-    $('s-lbl-lang-title').textContent= t('lbl_lang');
-    $('s-lbl-lang-sel').textContent  = t('lbl_lang_select');
-    $('s-hint-lang').textContent     = t('lbl_lang_hint');
-    $('s-lbl-reset').textContent     = t('btn_reset');
-    $('s-lbl-save').textContent      = t('btn_save');
-    $('s-lang').value                = _lang;
-    // Dialog
-    $('dlg-lbl-url').textContent     = t('lbl_link_url');
-    $('dlg-btn-current').textContent = t('btn_use_current');
-    $('dlg-lbl-title').textContent   = t('lbl_link_title');
-    $('dlg-lbl-desc').textContent    = t('lbl_link_desc');
-    $('dlg-lbl-logo').textContent    = t('lbl_link_logo');
-    $('dlg-lbl-sec').textContent     = t('lbl_link_section');
-    $('dlg-lbl-cancel').textContent  = t('btn_cancel');
-    $('dlg-lbl-save').textContent    = t('btn_save_link');
-    // Tab add button
-    if($('tab-add-btn')) $('tab-add-btn').textContent = t('btn_add_link');
-  } catch(e) { console.warn('applyLang error:', e); }
+  $('search-input').placeholder   = t('search_placeholder');
+  $('loading-text').textContent    = t('loading');
+  $('setup-title').textContent     = t('setup_title');
+  $('setup-desc').textContent      = t('setup_desc');
+  $('btn-open-settings').textContent = t('setup_btn');
+  $('btn-logout-settings').textContent = t('logout_btn');
+  $('error-title').textContent     = t('error_title');
+  $('btn-retry').textContent       = t('retry');
+  $('btn-refresh').title           = t('refresh');
+  $('dd-lbl-portal').textContent   = t('open_portal');
+  $('dd-lbl-settings').textContent = t('menu_settings');
+  $('dd-version').textContent      = ver;
+  $('dd-lang-sel').value           = _lang;
+  if($('s-version-btn')) $('s-version-btn').textContent = ver;
+  $('s-lbl-theme-title').textContent  = t('menu_theme')||'Design';
+  $('s-lbl-theme-light').textContent  = t('theme_light');
+  $('s-lbl-theme-auto').textContent   = t('theme_auto');
+  $('s-lbl-theme-dark').textContent   = t('theme_dark');
+  $('s-title-lbl').textContent     = t('settings_title');
+  $('s-lbl-conn').textContent      = t('lbl_connection');
+  $('s-lbl-url').textContent       = t('lbl_url');
+  $('s-base-url').placeholder      = 'https://portal.example.com';
+  $('s-hint-url').textContent      = t('lbl_url_hint');
+  $('s-lbl-user').textContent      = t('lbl_user');
+  $('s-hint-user').textContent     = t('lbl_user_hint');
+  $('s-lbl-token').textContent     = t('lbl_token');
+  $('s-hint-token').textContent    = t('lbl_token_hint');
+  $('s-lbl-test-title').textContent= t('lbl_test');
+  $('s-lbl-test-btn').textContent  = t('btn_test');
+  $('s-lbl-sync-title').textContent= t('lbl_sync_section');
+  $('s-lbl-last-sync').textContent = t('lbl_last_sync');
+  $('s-lbl-auto').textContent      = t('lbl_auto_sync');
+  $('s-auto-val').textContent      = t('lbl_auto_val');
+  $('s-lbl-cached').textContent    = t('lbl_cached');
+  $('s-lbl-sync-now').textContent  = t('btn_sync_now');
+  $('s-lbl-clear').textContent     = t('btn_clear_cache');
+  $('s-lbl-lang-title').textContent= t('lbl_lang');
+  $('s-lbl-lang-sel').textContent  = t('lbl_lang_select');
+  $('s-hint-lang').textContent     = t('lbl_lang_hint');
+  $('s-lbl-reset').textContent     = t('btn_reset');
+  $('s-lbl-save').textContent      = t('btn_save');
+  $('s-lang').value                = _lang;
+  $('dlg-lbl-url').textContent     = t('lbl_link_url');
+  $('dlg-btn-current').textContent = t('btn_use_current');
+  $('dlg-lbl-title').textContent   = t('lbl_link_title');
+  $('dlg-lbl-desc').textContent    = t('lbl_link_desc');
+  $('dlg-lbl-logo').textContent    = t('lbl_link_logo');
+  $('dlg-lbl-sec').textContent     = t('lbl_link_section');
+  $('dlg-lbl-cancel').textContent  = t('btn_cancel');
+  $('dlg-lbl-save').textContent    = t('btn_save_link');
+  if($('tab-add-btn')) $('tab-add-btn').textContent = t('btn_add_link');
 }
 
 // ── Show screen ──
@@ -159,100 +159,98 @@ const apiPut  = (p,b)=> apiFetch('PUT',p,b);
 const apiDel  = p    => apiFetch('DELETE',p);
 
 // ── Branding: logo (cached) + title ──
+// Uses URL.createObjectURL — simpler and no FileReader memory overhead
+async function blobToDataUrl(blob) {
+  const url = URL.createObjectURL(blob);
+  return new Promise((res, rej) => {
+    const img = new Image();
+    const canvas = document.createElement('canvas');
+    img.onload = () => {
+      URL.revokeObjectURL(url); // free memory immediately
+      res({ img, objectUrl: null });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(); };
+    img.src = url;
+  }).catch(() => null);
+}
+
+async function setLogoDisplay(src) {
+  $('portal-logo').src = src;
+  $('portal-logo').style.display = '';
+  $('default-icon').style.display = 'none';
+}
+
+async function setToolbarIcon(img) {
+  try {
+    const d = {};
+    for(const sz of [16, 48]) {
+      const c = document.createElement('canvas');
+      c.width = c.height = sz;
+      c.getContext('2d').drawImage(img, 0, 0, sz, sz);
+      d[sz] = c.getContext('2d').getImageData(0, 0, sz, sz);
+    }
+    await chrome.action.setIcon({ imageData: d });
+  } catch {}
+}
+
 async function loadBranding() {
   const base = S.baseUrl.replace(/\/$/,'');
 
-  // ── Show cached logo immediately (SVG for display, PNG for toolbar) ──
+  // Show cached logo immediately
   const cached = await chrome.storage.local.get(['logoDisplayUrl','logoPngUrl']);
-  if(cached.logoDisplayUrl) {
-    $('portal-logo').src = cached.logoDisplayUrl;
-    $('portal-logo').style.display = '';
-    $('default-icon').style.display = 'none';
-  }
+  if(cached.logoDisplayUrl) setLogoDisplay(cached.logoDisplayUrl);
 
-  // ── Fetch SVG for popup header (best quality for display) ──
-  const svgOk = await (async () => {
+  // Try SVG first (best for display), PNG fallback
+  let displayDataUrl = null;
+  for(const path of ['/img/logo.svg', '/img/logo.png']) {
     try {
-      const r = await fetch(base+'/img/logo.svg', {mode:'cors'});
-      if(!r.ok) return false;
+      const r = await fetch(base+path, {mode:'cors'});
+      if(!r.ok) continue;
       const blob = await r.blob();
-      return await new Promise(res => {
+      const objUrl = URL.createObjectURL(blob);
+      displayDataUrl = await new Promise(res => {
+        // Use FileReader only for persistent storage (data: URL needed)
         const rd = new FileReader();
-        rd.onload = async ev => {
-          const url = ev.target.result;
-          $('portal-logo').src = url;
-          $('portal-logo').style.display = '';
-          $('default-icon').style.display = 'none';
-          await chrome.storage.local.set({ logoDisplayUrl: url });
-          res(true);
-        };
-        rd.onerror = () => res(false);
+        rd.onload = e => res(e.target.result);
+        rd.onerror = () => res(null);
         rd.readAsDataURL(blob);
       });
-    } catch { return false; }
-  })();
-  if(!svgOk) {
-    // Try PNG as display fallback too
-    try {
-      const r = await fetch(base+'/img/logo.png', {mode:'cors'});
-      if(r.ok) {
-        const blob = await r.blob();
-        await new Promise(res => {
-          const rd = new FileReader();
-          rd.onload = async ev => {
-            const url = ev.target.result;
-            $('portal-logo').src = url;
-            $('portal-logo').style.display = '';
-            $('default-icon').style.display = 'none';
-            await chrome.storage.local.set({ logoDisplayUrl: url });
-            res();
-          };
-          rd.onerror = () => res();
-          rd.readAsDataURL(blob);
-        });
+      URL.revokeObjectURL(objUrl);
+      if(displayDataUrl) {
+        setLogoDisplay(displayDataUrl);
+        await chrome.storage.local.set({ logoDisplayUrl: displayDataUrl });
+        break;
       }
     } catch {}
   }
 
-  // ── Fetch PNG specifically for Chrome toolbar icon (SVG not supported) ──
-  // Also try favicon.ico as ultimate fallback
+  // Fetch PNG for toolbar icon (SVG not supported by chrome.action.setIcon)
   for(const path of ['/img/logo.png', '/favicon.ico', '/img/favicon.png']) {
     try {
       const r = await fetch(base+path, {mode:'cors'});
       if(!r.ok) continue;
-      const contentType = r.headers.get('content-type')||'';
-      if(!contentType.includes('png') && !contentType.includes('ico') && !contentType.includes('image')) continue;
+      const ct = r.headers.get('content-type')||'';
+      if(!ct.includes('png') && !ct.includes('ico') && !ct.includes('image')) continue;
       const blob = await r.blob();
-      const pngUrl = await new Promise(res => {
-        const rd = new FileReader();
-        rd.onload = ev => res(ev.target.result);
+      const objUrl = URL.createObjectURL(blob);
+      const img = await new Promise((res,rej) => {
+        const i = new Image();
+        i.onload = () => res(i);
+        i.onerror = rej;
+        i.src = objUrl;
+      }).catch(() => null);
+      URL.revokeObjectURL(objUrl);
+      if(!img) continue;
+      await setToolbarIcon(img);
+      // Store data URL for background.js startup restore
+      const rd = new FileReader();
+      const pngDataUrl = await new Promise(res => {
+        rd.onload = e => res(e.target.result);
         rd.onerror = () => res(null);
         rd.readAsDataURL(blob);
       });
-      if(!pngUrl) continue;
-
-      // Render to canvas → ImageData → setIcon
-      await new Promise(res => {
-        const img = new Image();
-        img.onload = async () => {
-          try {
-            const d = {};
-            for(const sz of [16, 48]) {
-              const c = document.createElement('canvas');
-              c.width = c.height = sz;
-              c.getContext('2d').drawImage(img, 0, 0, sz, sz);
-              d[sz] = c.getContext('2d').getImageData(0, 0, sz, sz);
-            }
-            chrome.action.setIcon({ imageData: d }).catch(()=>{});
-            // Store PNG data URL so background.js can restore on startup
-            await chrome.storage.local.set({ logoPngUrl: pngUrl });
-          } catch {}
-          res();
-        };
-        img.onerror = () => res();
-        img.src = pngUrl;
-      });
-      break; // success — stop trying
+      if(pngDataUrl) await chrome.storage.local.set({ logoPngUrl: pngDataUrl });
+      break;
     } catch {}
   }
 
@@ -281,36 +279,45 @@ async function loadBranding() {
   }
 }
 
-// ── Fetch all portal data ──
+// ── Fetch all portal data — tabs in parallel ──
 async function fetchFromApi() {
   $('loading-text').textContent = t('loading');
   const tabs = await apiGet('/tabs');
   const sections={}, links={}, perms={};
-  for(let i=0;i<tabs.length;i++) {
-    const tab=tabs[i];
-    $('loading-text').textContent = t('loading_tab')+' "'+tab.title+'"… ('+(i+1)+'/'+tabs.length+')';
+
+  // Fetch all tabs in parallel for speed
+  await Promise.all(tabs.map(async tab => {
     perms[tab.id] = tab.perms || {can_read:true,can_edit:false,can_delete:false};
     const secs = await apiGet('/tabs/'+tab.id+'/sections');
     sections[tab.id] = secs;
-    for(const sec of secs) {
+    // Fetch all sections in parallel within each tab
+    await Promise.all(secs.map(async sec => {
       try { links[sec.id] = await apiGet('/sections/'+sec.id+'/links'); }
       catch(e) { if(e.status===403) throw e; links[sec.id]=[]; }
-    }
-  }
+    }));
+  }));
+
   const data={tabs,sections,links,perms,syncTime:Date.now()};
   await chrome.storage.local.set({cache:data,cacheTime:Date.now()});
   return data;
 }
 
-function applyData(data) {
+function applyData(data, lastActiveTab) {
   S.tabs=data.tabs||[]; S.sections=data.sections||{};
   S.links=data.links||{}; S.perms=data.perms||{};
+  if(lastActiveTab && S.tabs.find(t2=>t2.id===lastActiveTab))
+    S.activeTab = lastActiveTab;
+  else if(!S.activeTab || !S.tabs.find(t2=>t2.id===S.activeTab))
+    S.activeTab = S.tabs[0]?.id || null;
+  // Build flat link list with precomputed search string
   S.allLinks=[];
   for(const tab of S.tabs)
     for(const sec of (S.sections[tab.id]||[]))
       for(const link of (S.links[sec.id]||[]))
         S.allLinks.push({...link,tabTitle:tab.title,tabId:tab.id,
-          sectionTitle:sec.title,sectionId:sec.id});
+          sectionTitle:sec.title,sectionId:sec.id,
+          _search:[link.title||'',link.description||'',link.url||'',tab.title,sec.title].join('\0').toLowerCase()
+        });
 }
 
 // ── Load data (cache-first) ──
@@ -323,19 +330,20 @@ async function loadData(force=false) {
   }
   try {
     if(!force){
-      const {cache}=await chrome.storage.local.get(['cache']);
+      const {cache, lastActiveTab}=await chrome.storage.local.get(['cache','lastActiveTab']);
       if(cache){
-        applyData(cache); renderAll(); showScreen('main');
+        applyData(cache, lastActiveTab); renderAll(); showScreen('main');
         $('cache-badge').style.display='';
         $('cache-badge').title=t('cache_from')+' '+new Date(cache.syncTime).toLocaleString();
         bgRefresh(); return;
       }
     }
-    applyData(await fetchFromApi()); clear403(); renderAll(); showScreen('main');
+    const {lastActiveTab}=await chrome.storage.local.get(['lastActiveTab']);
+    applyData(await fetchFromApi(), lastActiveTab); clear403(); renderAll(); showScreen('main');
   } catch(err) {
     if(err.status===403){if(await record403())await doLogout('403');else{$('error-message').textContent=t('test_err_403');showScreen('error');}return;}
     const {cache}=await chrome.storage.local.get(['cache']);
-    if(cache){applyData(cache);renderAll();showScreen('main');
+    if(cache){applyData(cache, S.activeTab);renderAll();showScreen('main');
       $('cache-badge').style.display='';
       $('cache-badge').title=t('cache_offline')+' '+new Date(cache.syncTime).toLocaleString();}
     else{$('error-message').textContent=err.message;showScreen('error');}
@@ -362,22 +370,17 @@ async function syncLangFromPortal() {
   }
   // Apply only if different from current
   if(portalLang && portalLang !== _lang) {
-    console.log(`[LP] lang portal=${portalLang} local=${_lang} → applying`);
-    setLang(portalLang);
-    await chrome.storage.local.set({ lang: portalLang });
-    applyLang();
-    if($('dd-lang-sel')) $('dd-lang-sel').value = portalLang;
-    if($('s-lang')) $('s-lang').value = portalLang;
+    await changeLang(portalLang, true); // true = don't sync back to portal
   }
 }
 
 async function bgRefresh() {
   try{
-    applyData(await fetchFromApi());
+    const {lastActiveTab}=await chrome.storage.local.get(['lastActiveTab']);
+    applyData(await fetchFromApi(), lastActiveTab);
     clear403();
     $('cache-badge').style.display='none';
-    if(S.activeTab) renderTabContent(S.activeTab);
-    renderTabBar();
+    renderAll();
     // Always fetch lang from portal directly — don't rely on stale storage
     await syncLangFromPortal();
   }
@@ -385,19 +388,13 @@ async function bgRefresh() {
 }
 
 // ── Render ──
-async function renderAll() {
+function renderAll() {
   if(!S.tabs.length){
     $('tabs-bar').style.display='none';
     $('tab-content').innerHTML='<div class="empty-tab"><div class="empty-icon">🔒</div><p>'+t('no_tabs')+'</p></div>';
     return;
   }
   $('tabs-bar').style.display='';
-  // Restore last active tab from storage, fall back to first
-  if(!S.activeTab || !S.tabs.find(t2=>t2.id===S.activeTab)) {
-    const { lastActiveTab } = await chrome.storage.local.get(['lastActiveTab']);
-    const restored = lastActiveTab && S.tabs.find(t2=>t2.id===lastActiveTab);
-    S.activeTab = restored ? lastActiveTab : S.tabs[0].id;
-  }
   renderTabBar(); renderTabContent(S.activeTab);
 }
 
@@ -434,6 +431,13 @@ function openTabsDropdown() {
   ).join('');
   dropdown.querySelectorAll('.tab-drop-item').forEach(btn => {
     btn.addEventListener('click', () => {
+      // Cancel any in-progress DnD before switching tab
+      if(_dnd) {
+        _dnd.item.classList.remove('dragging');
+        _dnd.item.style.visibility = '';
+        _dnd.line.remove();
+        _dnd = null;
+      }
       S.activeTab = parseInt(btn.dataset.id);
       chrome.storage.local.set({ lastActiveTab: S.activeTab });
       dropdown.style.display = 'none'; chevron.classList.remove('open');
@@ -485,19 +489,15 @@ function renderTabContent(tabId) {
 function linkHtml(link, canEdit, canDel, hi='') {
   const title = hi?hilite(link.title||'',hi):esc(link.title||'');
   const desc  = hi?hilite(link.description||'',hi):esc(link.description||'');
-  const openSvg='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
-  const editSvg='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-  const delSvg ='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
-  const dragSvg='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="18" x2="16" y2="18"/></svg>';
   return '<a class="link-item" data-id="'+link.id+'" data-sec="'+link.sectionId+'" data-url="'+esc(link.url)+'" href="#">'+
-    (canEdit?'<span class="drag-handle">'+dragSvg+'</span>':'')+
+    (canEdit?'<span class="drag-handle">'+SVG.drag+'</span>':'')+
     favicon(link)+
     '<div class="link-info"><div class="link-title">'+title+'</div>'+
     (link.description?'<div class="link-desc">'+desc+'</div>':'')+
     '</div><div class="link-actions">'+
-    (canEdit?'<button class="link-action-btn edit-btn" data-id="'+link.id+'">'+editSvg+'</button>':'')+
-    (canDel?'<button class="link-action-btn del" data-id="'+link.id+'">'+delSvg+'</button>':'')+
-    '<button class="link-action-btn open-btn">'+openSvg+'</button>'+
+    (canEdit?'<button class="link-action-btn edit-btn" data-id="'+link.id+'">'+SVG.edit+'</button>':'')+
+    (canDel?'<button class="link-action-btn del" data-id="'+link.id+'">'+SVG.del+'</button>':'')+
+    '<button class="link-action-btn open-btn">'+SVG.open+'</button>'+
     '</div></a>';
 }
 
@@ -614,25 +614,27 @@ function performSearch(q) {
   const sr=$('search-results'),tc=$('tab-content'),tb=$('tabs-bar');
   if(!q){sr.style.display='none';tc.style.display='';tb.style.display='';return;}
   tc.style.display='none';tb.style.display='none';sr.style.display='';
-  const m=S.allLinks.filter(l=>[l.title,l.description||'',l.url,l.tabTitle,l.sectionTitle].join(' ').toLowerCase().includes(q));
+  const m=S.allLinks.filter(l=>l._search.includes(q));
   const cnt=m.length;
   $('results-header').textContent=cnt+' '+(cnt===1?t('results_suffix_one'):t('results_suffix_many'));
   const list=$('results-list');
   if(!cnt){list.innerHTML='<div class="no-results"><div class="no-results-icon">🔍</div><span>'+t('no_results_prefix')+' "'+esc(q)+'"</span></div>';return;}
-  const openSvg='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
   list.innerHTML = m.map(link => {
-    const tp=S.perms[link.tabId]||{};
-    const editSvg='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-    const delSvg='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+    // Use section-level perms (sec_perms) with tab-level fallback
+    const sec = (S.sections[link.tabId]||[]).find(s=>s.id===link.sectionId);
+    const sp = sec ? (sec.sec_perms || sec.perms || null) : null;
+    const tp = S.perms[link.tabId]||{};
+    const canEdit = sp ? (sp.can_edit  ||false) : (tp.can_edit  ||false);
+    const canDel  = sp ? (sp.can_delete||false) : (tp.can_delete||false);
     return '<a class="link-item" data-id="'+link.id+'" data-sec="'+link.sectionId+'" data-url="'+esc(link.url)+'" href="#">'+
       favicon(link)+
       '<div class="link-info"><div class="link-title">'+hilite(link.title||'',q)+'</div>'+
       (link.description?'<div class="link-desc">'+hilite(link.description,q)+'</div>':'')+
       '<div class="result-breadcrumb"><span>'+esc(link.tabTitle)+'</span> › '+esc(link.sectionTitle)+'</div>'+
       '</div><div class="link-actions">'+
-      (tp.can_edit?'<button class="link-action-btn edit-btn" data-id="'+link.id+'">'+editSvg+'</button>':'')+
-      (tp.can_delete?'<button class="link-action-btn del" data-id="'+link.id+'">'+delSvg+'</button>':'')+
-      '<button class="link-action-btn open-btn">'+openSvg+'</button>'+
+      (canEdit?'<button class="link-action-btn edit-btn" data-id="'+link.id+'">'+SVG.edit+'</button>':'')+
+      (canDel?'<button class="link-action-btn del" data-id="'+link.id+'">'+SVG.del+'</button>':'')+
+      '<button class="link-action-btn open-btn">'+SVG.open+'</button>'+
       '</div></a>';
   }).join('');
   list.querySelectorAll('.link-item').forEach(el=>{
@@ -644,7 +646,14 @@ function performSearch(q) {
   });
 }
 
-function clearSearch(){$('search-input').value='';$('search-clear').style.display='none';performSearch('');}
+function clearSearch(){
+  $('search-input').value='';
+  $('search-clear').style.display='none';
+  // Restore both tab-content and tabs-bar directly (don't call performSearch to avoid re-render)
+  $('search-results').style.display='none';
+  $('tab-content').style.display='';
+  $('tabs-bar').style.display='';
+}
 function hilite(t2,q){return esc(t2).replace(new RegExp('('+escRx(q)+')','gi'),'<mark>$1</mark>');}
 
 // ══════════════════════════════════════════
@@ -668,7 +677,7 @@ function openLinkDialog(link, tabId) {
     }
   }
   if(!hasOptions){alert(t('no_edit_sections'));return;}
-  $('dlg-title').textContent=$('dlg-title').textContent = link?t('dlg_edit_title'):t('dlg_add_title');
+  $('dlg-title').textContent = link?t('dlg_edit_title'):t('dlg_add_title');
   $('dlg-link-id').value  = link?link.id:'';
   $('dlg-url').value       = link?(link.url||''):'';
   $('dlg-title-inp').value = link?(link.title||''):'';
@@ -697,20 +706,18 @@ async function saveLinkDialog() {
     if(isEdit) await apiPut('/links/'+linkId,body);
     else await apiPost('/sections/'+secId+'/links',body);
     closeLinkDialog();
-    applyData(await fetchFromApi());
-    renderTabContent(S.activeTab);
-    renderTabBar();
+    applyData(await fetchFromApi(), S.activeTab);
+    renderAll();
   } catch(err){showDlgErr(err.message);}
-  $('dlg-save').disabled=false;
+  finally{$('dlg-save').disabled=false;}
 }
 
 async function deleteLink(linkId, tabId) {
   if(!confirm(t('confirm_delete_link'))) return;
   try {
     await apiDel('/links/'+linkId);
-    applyData(await fetchFromApi());
-    renderTabContent(S.activeTab||tabId);
-    renderTabBar();
+    applyData(await fetchFromApi(), S.activeTab);
+    renderAll();
   } catch(err){alert(err.message);}
 }
 
@@ -726,7 +733,7 @@ async function openSettings() {
   $('s-username').value  = stored.username||'';
   if(stored.token){
     S.tokenSaved=true; S.testPassed=true;
-    S.lastTestedUrl=stored.baseUrl||''; S.lastTestedUser=stored.username||''; S.lastTestedToken='(saved)';
+    S.lastTestedUrl=stored.baseUrl||''; S.lastTestedUser=stored.username||''; 
     $('s-api-token').value=''; $('s-api-token').placeholder=t('lbl_token_hint');
     $('s-api-token').readOnly=true; $('s-api-token').type='password';
     $('s-btn-edit-tok').style.display=''; $('s-btn-show-tok').style.display='none';
@@ -796,7 +803,7 @@ async function testConnection(){
     else if(r.status===401){S.testPassed=false;showSResult(res,'error',t('test_err_401'));}
     else if(r.ok){
       const tabs=await r.json().catch(()=>[]);
-      S.testPassed=true; S.lastTestedUrl=baseUrl; S.lastTestedUser=username; S.lastTestedToken=S.tokenSaved?'(saved)':token;
+      S.testPassed=true; S.lastTestedUrl=baseUrl; S.lastTestedUser=username; 
       showSResult(res,'success',t('test_ok')+'<br><small>📂 '+tabs.length+' '+t('test_tabs')+'</small>');
     } else {S.testPassed=false;showSResult(res,'error',t('test_err_http')+' '+r.status);}
   }catch(err){S.testPassed=false;showSResult(res,'error','❌ '+esc(err.message));}
@@ -824,8 +831,10 @@ async function saveSettings(){
 
 async function resetSettings(){
   if(!confirm(t('confirm_reset'))) return;
-  await chrome.storage.sync.clear(); await chrome.storage.local.clear();
-  S.baseUrl='';S.token='';S.username='';S.tabs=[];S.tokenSaved=false;S.testPassed=false;
+  await chrome.storage.sync.clear();
+  // Preserve UI prefs (lang, theme, logo cache) — only clear session data
+  await chrome.storage.local.remove(['cache','cacheTime','err403','logoutReason','lastActiveTab']);
+  S.baseUrl='';S.token='';S.username='';S.tabs=[];S.activeTab=null;S.tokenSaved=false;S.testPassed=false;
   $('s-base-url').value='';$('s-username').value='';
   $('s-api-token').value='';$('s-api-token').readOnly=false;
   $('s-api-token').placeholder='eyJhbGciOiJIUzI1NiIs…';
@@ -864,9 +873,8 @@ async function syncNow(){
   showSResult($('s-sync-result'),'loading',t('sync_loading'));
   try {
     // Use fetchFromApi directly (same as refresh button) — avoids message passing issues
-    applyData(await fetchFromApi());
-    if(S.activeTab) renderTabContent(S.activeTab);
-    renderTabBar();
+    applyData(await fetchFromApi(), S.activeTab);
+    renderAll();
     await loadCacheInfo();
     showSResult($('s-sync-result'),'success',t('sync_ok')+' '+new Date().toLocaleTimeString());
   } catch(err) {
@@ -889,11 +897,12 @@ async function loadCacheInfo(){
   else $('s-cache-cnt').textContent='0 Links';
 }
 
-async function changeLang(code){
+async function changeLang(code, skipPortalSync=false){
   setLang(code); await chrome.storage.local.set({lang:code}); applyLang();
   if($('s-lang')) $('s-lang').value=code;
   if($('dd-lang-sel')) $('dd-lang-sel').value=code;
-  if(S.baseUrl&&S.token){
+  // Only sync back to portal if change came from user (not from portal itself)
+  if(!skipPortalSync && S.baseUrl && S.token){
     try{await apiFetch('PUT','/settings',{language:code});}catch{}
   }
 }

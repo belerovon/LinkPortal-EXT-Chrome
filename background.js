@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════
-   LinkPortal Extension — background.js  v1.5.3
+   LinkPortal Extension — background.js  v1.5.4
    Basic Auth · Periodic Sync · 30-day Logout
    ════════════════════════════════════════════════════ */
 
@@ -86,15 +86,18 @@ async function fetchAllData(baseUrl, username, token) {
 
   const tabs = await get('/tabs');
   const result = { tabs, sections: {}, links: {}, perms: {}, syncTime: Date.now() };
-  for (const tab of tabs) {
+
+  // Fetch all tabs in parallel
+  await Promise.all(tabs.map(async tab => {
     result.perms[tab.id] = tab.perms || { can_read:true, can_edit:false, can_delete:false };
     const sections = await get('/tabs/' + tab.id + '/sections');
     result.sections[tab.id] = sections;
-    for (const sec of sections) {
+    await Promise.all(sections.map(async sec => {
       try { result.links[sec.id] = await get('/sections/' + sec.id + '/links'); }
-      catch { result.links[sec.id] = []; }
-    }
-  }
+      catch(e) { if(e.status===403) throw e; result.links[sec.id] = []; }
+    }));
+  }));
+
   return result;
 }
 
@@ -139,6 +142,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     fetchAllData(msg.baseUrl, msg.username, msg.token)
       .then(data => {
         chrome.storage.local.set({ cache: data, cacheTime: Date.now() });
+        chrome.storage.local.remove(['err403']);
         sendResponse({ ok: true, data });
       })
       .catch(async err => {
