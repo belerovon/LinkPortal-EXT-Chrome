@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════
-   LinkPortal Extension — popup.js  v1.5.5
+   LinkPortal Extension — popup.js  v1.5.6
    ═══════════════════════════════════════════════════════════ */
 
-const VERSION = '1.5.5';
+const VERSION = '1.5.6';
 const MAX_INACTIVE_DAYS = 30;
 
 // ── 403 Threshold: 3 failures within 5 minutes triggers logout ──
@@ -509,13 +509,27 @@ function renderTabContent(tabId) {
   for(let i=0;i<secs.length;i++){
     const sec=secs[i];
     const st = sec.section_type || 'links';
-    // Only render 'links' and 'search' types
-    if(st !== 'links' && st !== 'search') continue;
+    // Only render 'links', 'search', 'tasks', 'translate' types
+    if(st !== 'links' && st !== 'search' && st !== 'tasks' && st !== 'translate') continue;
 
     if(st === 'search') {
       has=true;
       if(i>0) html+='<div class="section-divider"></div>';
       html += renderSearchSection(sec);
+      continue;
+    }
+
+    if(st === 'tasks') {
+      has=true;
+      if(i>0) html+='<div class="section-divider"></div>';
+      html += renderTasksSection(sec);
+      continue;
+    }
+
+    if(st === 'translate') {
+      has=true;
+      if(i>0) html+='<div class="section-divider"></div>';
+      html += renderTranslateSection(sec);
       continue;
     }
 
@@ -563,6 +577,148 @@ function renderTabContent(tabId) {
         if(first) first.click();
       }
     });
+  });
+
+  // Wire up tasks sections — load live from API
+  content.querySelectorAll('.tasks-section-widget').forEach(widget => {
+    const secId = parseInt(widget.dataset.secId);
+    loadTasksInto(widget, secId);
+  });
+
+  // Wire up translate sections
+  content.querySelectorAll('.translate-section-widget').forEach(widget => {
+    const secId = parseInt(widget.dataset.secId);
+    wireTranslateWidget(widget, secId);
+  });
+}
+
+// ── Tasks section ──
+function renderTasksSection(sec) {
+  return '<div class="section-block tasks-section-widget" data-sec-id="'+sec.id+'">'
+    + '<div class="section-header">'
+    + (sec.icon ? '<span class="section-icon">'+sec.icon+'</span>' : '')
+    + '<span class="section-title">'+esc(sec.title)+'</span>'
+    + '</div>'
+    + '<div class="tasks-body"><div class="tasks-loading">⏳</div></div>'
+    + '</div>';
+}
+
+async function loadTasksInto(widget, secId) {
+  const body = widget.querySelector('.tasks-body');
+  // Check if user can edit (for add + toggle)
+  const sec = Object.values(S.sections).flat().find(s => s.id === secId);
+  const tabId = Object.entries(S.sections).find(([,secs]) => secs.some(s=>s.id===secId))?.[0];
+  const sp  = sec ? (sec.sec_perms || sec.perms || null) : null;
+  const tp  = S.perms[tabId] || {};
+  const canEdit = sp ? (sp.can_edit||false) : (tp.can_edit||false);
+
+  try {
+    const tasks = await apiGet('/sections/'+secId+'/tasks');
+    const open   = tasks.filter(t => !t.done);
+    const done   = tasks.filter(t =>  t.done);
+    const PRIO = { high:'🔴', medium:'🟡', low:'🟢', none:'' };
+
+    const renderTask = task => {
+      const prio = PRIO[task.priority] || '';
+      const due  = task.due_date ? ' <span class="task-due">📅 '+task.due_date.slice(0,10)+'</span>' : '';
+      return '<label class="task-item'+(task.done?' task-done':'')+'" data-id="'+task.id+'">'
+        + '<input type="checkbox"'+(task.done?' checked':'')+(canEdit?'':' disabled')+'>'
+        + '<span class="task-title">'+(prio?prio+' ':'')+esc(task.title)+due+'</span>'
+        + '</label>';
+    };
+
+    body.innerHTML = open.map(renderTask).join('')
+      + (done.length ? '<div class="task-done-divider">✓ '+done.length+'</div>'
+          + done.map(renderTask).join('') : '')
+      + (canEdit ? '<div class="task-add-row"><input class="task-add-input" placeholder="'
+          + t('task_add_placeholder') + '" type="text"><button class="task-add-btn">+</button></div>' : '');
+
+    // Toggle done
+    if(canEdit) body.querySelectorAll('.task-item input[type=checkbox]').forEach(cb => {
+      cb.addEventListener('change', async () => {
+        const id = parseInt(cb.closest('.task-item').dataset.id);
+        try { await apiFetch('PUT', '/tasks/'+id, {done: cb.checked}); }
+        catch { cb.checked = !cb.checked; return; }
+        // Re-render
+        loadTasksInto(widget, secId);
+      });
+    });
+
+    // Add task
+    if(canEdit) {
+      const addInput = body.querySelector('.task-add-input');
+      const addBtn   = body.querySelector('.task-add-btn');
+      const doAdd = async () => {
+        const title = addInput.value.trim();
+        if(!title) { addInput.focus(); return; }
+        try {
+          await apiPost('/sections/'+secId+'/tasks', {title, priority:'none', sort_order:0});
+          addInput.value = '';
+          loadTasksInto(widget, secId);
+        } catch {}
+      };
+      addBtn.addEventListener('click', doAdd);
+      addInput.addEventListener('keydown', e => { if(e.key==='Enter') doAdd(); });
+    }
+  } catch {
+    body.innerHTML = '<div class="tasks-error">⚠️</div>';
+  }
+}
+
+// ── Translate section ──
+function renderTranslateSection(sec) {
+  const LANGS = [
+    ['auto','🔄 Auto'],['de','🇩🇪 Deutsch'],['en','🇬🇧 English'],['fr','🇫🇷 Français'],
+    ['es','🇪🇸 Español'],['it','🇮🇹 Italiano'],['pt','🇵🇹 Português'],['nl','🇳🇱 Nederlands'],
+    ['pl','🇵🇱 Polski'],['ru','🇷🇺 Русский'],['zh','🇨🇳 中文'],['ja','🇯🇵 日本語'],
+    ['ko','🇰🇷 한국어'],['ar','🇸🇦 العربية'],['tr','🇹🇷 Türkçe'],['sv','🇸🇪 Svenska'],
+  ];
+  const opts = LANGS.map(([v,l]) => '<option value="'+v+'"'+(v==='de'?' selected':'')+'>'+l+'</option>').join('');
+  const enOpts = LANGS.filter(([v])=>v!=='auto').map(([v,l]) => '<option value="'+v+'"'+(v==='en'?' selected':'')+'>'+l+'</option>').join('');
+  return '<div class="section-block translate-section-widget" data-sec-id="'+sec.id+'">'
+    + '<div class="section-header">'
+    + (sec.icon ? '<span class="section-icon">'+sec.icon+'</span>' : '')
+    + '<span class="section-title">'+esc(sec.title)+'</span>'
+    + '</div>'
+    + '<div class="translate-body">'
+    + '<div class="translate-controls">'
+    + '<select class="tr-from input-sel">'+opts+'</select>'
+    + '<button class="tr-swap" title="Tauschen">⇄</button>'
+    + '<select class="tr-to input-sel">'+enOpts+'</select>'
+    + '<button class="tr-go btn btn-primary">🌐</button>'
+    + '</div>'
+    + '<textarea class="tr-input" placeholder="'+t('tr_input_placeholder')+'" rows="3"></textarea>'
+    + '</div></div>';
+}
+
+function wireTranslateWidget(widget) {
+  const fromSel = widget.querySelector('.tr-from');
+  const toSel   = widget.querySelector('.tr-to');
+  const input   = widget.querySelector('.tr-input');
+  const goBtn   = widget.querySelector('.tr-go');
+  const swapBtn = widget.querySelector('.tr-swap');
+
+  const doTranslate = () => {
+    const text = input.value.trim();
+    if(!text) { input.focus(); return; }
+    const sl = fromSel.value;
+    const tl = toSel.value;
+    const url = 'https://translate.google.com/?sl='+sl+'&tl='+tl+'&text='+encodeURIComponent(text)+'&op=translate';
+    chrome.tabs.create({url, active:true});
+  };
+
+  swapBtn.addEventListener('click', () => {
+    const fromVal = fromSel.value === 'auto' ? 'de' : fromSel.value;
+    const toVal   = toSel.value;
+    // Swap values (auto stays as from only)
+    const prev = fromSel.value;
+    fromSel.value = toVal;
+    toSel.value   = fromVal === 'auto' ? 'de' : fromVal;
+  });
+
+  goBtn.addEventListener('click', doTranslate);
+  input.addEventListener('keydown', e => {
+    if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)) doTranslate();
   });
 }
 
@@ -835,9 +991,15 @@ async function openSettings() {
   showScreen('settings');
 }
 
-function closeSettings(){
+async function closeSettings(){
   chrome.storage.local.remove(['settingsOpen']);
-  if(S.baseUrl&&S.token) showScreen('main'); else showScreen('setup');
+  if(S.baseUrl && S.token) {
+    showScreen('main');
+    // Refresh data — fixes empty view after first setup or credential change
+    await loadData(true);
+  } else {
+    showScreen('setup');
+  }
 }
 
 function updateSaveBtn(){
@@ -928,6 +1090,8 @@ async function saveSettings(){
   $('s-api-token').placeholder=t('lbl_token_hint');
   $('s-btn-edit-tok').style.display=''; $('s-btn-show-tok').style.display='none';
   showStatus(t('save_ok'),'success'); updateSaveBtn();
+  // Close settings and refresh after short delay so user sees the success message
+  setTimeout(() => closeSettings(), 800);
 }
 
 async function resetSettings(){
