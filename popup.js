@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════
-   LinkPortal Extension — popup.js  v1.5.4
+   LinkPortal Extension — popup.js  v1.5.5
    ═══════════════════════════════════════════════════════════ */
 
-const VERSION = '1.5.4';
+const VERSION = '1.5.5';
 const MAX_INACTIVE_DAYS = 30;
 
 // ── 403 Threshold: 3 failures within 5 minutes triggers logout ──
@@ -101,6 +101,9 @@ function applyLang() {
   $('s-lbl-cached').textContent    = t('lbl_cached');
   $('s-lbl-sync-now').textContent  = t('btn_sync_now');
   $('s-lbl-clear').textContent     = t('btn_clear_cache');
+  if($('s-lbl-tabpersist-title')) $('s-lbl-tabpersist-title').textContent = t('lbl_tabpersist');
+  if($('s-lbl-tabpersist-label')) $('s-lbl-tabpersist-label').textContent = t('lbl_tabpersist_label');
+  if($('s-lbl-tabpersist-hint'))  $('s-lbl-tabpersist-hint').textContent  = t('lbl_tabpersist_hint');
   $('s-lbl-lang-title').textContent= t('lbl_lang');
   $('s-lbl-lang-sel').textContent  = t('lbl_lang_select');
   $('s-hint-lang').textContent     = t('lbl_lang_hint');
@@ -302,12 +305,13 @@ async function fetchFromApi() {
   return data;
 }
 
-function applyData(data, lastActiveTab) {
+function applyData(data, lastActiveTab, tabPersist=true) {
   S.tabs=data.tabs||[]; S.sections=data.sections||{};
   S.links=data.links||{}; S.perms=data.perms||{};
-  if(lastActiveTab && S.tabs.find(t2=>t2.id===lastActiveTab))
+  // Restore last tab only if tabPersist is enabled
+  if(tabPersist && lastActiveTab && S.tabs.find(t2=>t2.id===lastActiveTab))
     S.activeTab = lastActiveTab;
-  else if(!S.activeTab || !S.tabs.find(t2=>t2.id===S.activeTab))
+  else if(!S.activeTab || !S.tabs.find(t2=>t2.id===S.activeTab) || !tabPersist)
     S.activeTab = S.tabs[0]?.id || null;
   // Build flat link list with precomputed search string
   S.allLinks=[];
@@ -330,16 +334,16 @@ async function loadData(force=false) {
   }
   try {
     if(!force){
-      const {cache, lastActiveTab}=await chrome.storage.local.get(['cache','lastActiveTab']);
+      const {cache, lastActiveTab, tabPersist}=await chrome.storage.local.get(['cache','lastActiveTab','tabPersist']);
       if(cache){
-        applyData(cache, lastActiveTab); renderAll(); showScreen('main');
+        applyData(cache, lastActiveTab, tabPersist!==false); renderAll(); showScreen('main');
         $('cache-badge').style.display='';
         $('cache-badge').title=t('cache_from')+' '+new Date(cache.syncTime).toLocaleString();
         bgRefresh(); return;
       }
     }
-    const {lastActiveTab}=await chrome.storage.local.get(['lastActiveTab']);
-    applyData(await fetchFromApi(), lastActiveTab); clear403(); renderAll(); showScreen('main');
+    const {lastActiveTab, tabPersist}=await chrome.storage.local.get(['lastActiveTab','tabPersist']);
+    applyData(await fetchFromApi(), lastActiveTab, tabPersist!==false); clear403(); renderAll(); showScreen('main');
   } catch(err) {
     if(err.status===403){if(await record403())await doLogout('403');else{$('error-message').textContent=t('test_err_403');showScreen('error');}return;}
     const {cache}=await chrome.storage.local.get(['cache']);
@@ -447,24 +451,83 @@ function openTabsDropdown() {
   dropdown.style.display = ''; chevron.classList.add('open');
 }
 
+// ── Render search engine section ──
+function renderSearchSection(sec) {
+  let engines = [];
+  // Parse engine list from content JSON
+  if(sec.content) {
+    try {
+      const cfg = JSON.parse(sec.content);
+      if(Array.isArray(cfg.engines)) engines = cfg.engines;
+      else {
+        // Legacy format: {web:true, ai:true}
+        if(cfg.web) engines.push(...['google','bing','ddg']);
+        if(cfg.ai)  engines.push(...['claude','chatgpt','gemini']);
+      }
+    } catch {}
+  }
+  if(!engines.length) engines = ['google','bing','ddg'];
+
+  const ENGINE_MAP = {
+    google:  { label:'Google',     url:'https://www.google.com/search?q={q}',         icon:'🔍' },
+    bing:    { label:'Bing',       url:'https://www.bing.com/search?q={q}',            icon:'🔎' },
+    ddg:     { label:'DuckDuckGo', url:'https://duckduckgo.com/?q={q}',               icon:'🦆' },
+    claude:  { label:'Claude',     url:'https://claude.ai/new?q={q}',                 icon:'🤖' },
+    chatgpt: { label:'ChatGPT',    url:'https://chat.openai.com/?q={q}',              icon:'💬' },
+    gemini:  { label:'Gemini',     url:'https://gemini.google.com/app?q={q}',         icon:'✨' },
+    brave:   { label:'Brave',      url:'https://search.brave.com/search?q={q}',       icon:'🦁' },
+    ecosia:  { label:'Ecosia',     url:'https://www.ecosia.org/search?method=index&q={q}', icon:'🌱' },
+  };
+
+  const buttons = engines
+    .filter(id => ENGINE_MAP[id])
+    .map(id => {
+      const e = ENGINE_MAP[id];
+      return '<button class="search-engine-btn" data-url="'+esc(e.url)+'" title="'+esc(e.label)+'">'
+        + e.icon + ' ' + esc(e.label) + '</button>';
+    }).join('');
+
+  return '<div class="section-block search-section-widget" data-sec-id="'+sec.id+'">'
+    + '<div class="section-header">'
+    + (sec.icon ? '<span class="section-icon">'+sec.icon+'</span>' : '')
+    + '<span class="section-title">'+esc(sec.title)+'</span>'
+    + '</div>'
+    + '<div class="search-widget">'
+    + '<input type="text" class="search-input search-widget-input" placeholder="'+t('lbl_search_section_placeholder')+'">'
+    + '<div class="search-engine-btns">'+buttons+'</div>'
+    + '</div></div>';
+}
+
 // ── Render tab content ──
 function renderTabContent(tabId) {
   const content = $('tab-content');
   const secs = S.sections[tabId]||[];
   const tabPerm = S.perms[tabId]||{};
+  const tabEdit = tabPerm.can_edit||false;
+  const tabDel  = tabPerm.can_delete||false;
   let html='', has=false;
   for(let i=0;i<secs.length;i++){
-    const sec=secs[i], lnks=S.links[sec.id]||[];
+    const sec=secs[i];
+    const st = sec.section_type || 'links';
+    // Only render 'links' and 'search' types
+    if(st !== 'links' && st !== 'search') continue;
+
+    if(st === 'search') {
+      has=true;
+      if(i>0) html+='<div class="section-divider"></div>';
+      html += renderSearchSection(sec);
+      continue;
+    }
+
+    // links section
+    const lnks=S.links[sec.id]||[];
     if(!lnks.length) continue;
     has=true;
-    // API returns sec_perms (section-level) — fallback to tab perms if absent
     const sp = sec.sec_perms || sec.perms || null;
-    const canCreate = sp ? (sp.can_create||false) : (tabPerm.can_edit||false);
-    const canEdit   = sp ? (sp.can_edit  ||false) : (tabPerm.can_edit  ||false);
-    const canDel    = sp ? (sp.can_delete||false) : (tabPerm.can_delete||false);
+    const canEdit   = sp ? (sp.can_edit  ||false) : tabEdit;
+    const canDel    = sp ? (sp.can_delete||false) : tabDel;
     if(i>0) html+='<div class="section-divider"></div>';
-    html+='<div class="section-block" data-sec-id="'+sec.id+'">' +
-      '<div class="section-header">'+
+    html+='<div class="section-block" data-sec-id="'+sec.id+'"><div class="section-header">'+
       (sec.icon?'<span class="section-icon">'+sec.icon+'</span>':'')+
       '<span class="section-title">'+esc(sec.title)+'</span>'+
       '<button class="section-count" data-sec-id="'+sec.id+'" title="'+t('open_all_links')+'">'+lnks.length+'</button>'+
@@ -475,12 +538,30 @@ function renderTabContent(tabId) {
     '<div class="empty-tab"><div class="empty-icon">📭</div><p>'+t('no_links')+'</p></div>';
   bindLinks(content, tabId);
 
-  // Section count: open all links in section
+  // Section count: open all links
   content.querySelectorAll('.section-count[data-sec-id]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      const secId = parseInt(btn.dataset.secId);
-      (S.links[secId]||[]).forEach(l => chrome.tabs.create({url: l.url, active: false}));
+      (S.links[parseInt(btn.dataset.secId)]||[]).forEach(l => chrome.tabs.create({url:l.url,active:false}));
+    });
+  });
+
+  // Wire up search engine widgets
+  content.querySelectorAll('.search-section-widget').forEach(widget => {
+    const input = widget.querySelector('.search-widget-input');
+    widget.querySelectorAll('.search-engine-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const q = input.value.trim();
+        if(!q) { input.focus(); return; }
+        const url = btn.dataset.url.replace('{q}', encodeURIComponent(q));
+        chrome.tabs.create({url, active:true});
+      });
+    });
+    input.addEventListener('keydown', e => {
+      if(e.key === 'Enter') {
+        const first = widget.querySelector('.search-engine-btn');
+        if(first) first.click();
+      }
     });
   });
 }
@@ -728,6 +809,9 @@ function showDlgErr(msg){$('dlg-err').style.display='';$('dlg-err').textContent=
 // ══════════════════════════════════════════
 async function openSettings() {
   closeDropdown();
+  // Mark settings as open so it re-opens after popup restart
+  await chrome.storage.local.set({ settingsOpen: true });
+
   const stored=await chrome.storage.sync.get(['baseUrl','token','username']);
   $('s-base-url').value  = stored.baseUrl||'';
   $('s-username').value  = stored.username||'';
@@ -744,11 +828,15 @@ async function openSettings() {
     $('s-btn-edit-tok').style.display='none'; $('s-btn-show-tok').style.display='';
   }
   $('s-lang').value=_lang;
+  // Load tab persistence setting
+  const { tabPersist } = await chrome.storage.local.get(['tabPersist']);
+  if($('s-tabpersist')) $('s-tabpersist').checked = tabPersist !== false; // default ON
   updateSaveBtn(); loadCacheInfo();
   showScreen('settings');
 }
 
 function closeSettings(){
+  chrome.storage.local.remove(['settingsOpen']);
   if(S.baseUrl&&S.token) showScreen('main'); else showScreen('setup');
 }
 
@@ -759,6 +847,22 @@ function updateSaveBtn(){
 
 function watchSettingsFields(){
   let autoTestTimer = null;
+  let autoSaveTimer = null;
+
+  // Auto-save partial credentials so they survive popup close during setup
+  function autoSavePartial() {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(async () => {
+      const url  = $('s-base-url').value.trim().replace(/\/$/,'');
+      const user = $('s-username').value.trim();
+      const tok  = S.tokenSaved ? null : $('s-api-token').value.trim();
+      const patch = {};
+      if(url)  patch.baseUrl  = url;
+      if(user) patch.username = user;
+      if(tok)  patch.token    = tok;
+      if(Object.keys(patch).length) await chrome.storage.sync.set(patch);
+    }, 800);
+  }
 
   function maybeAutoTest() {
     const url   = $('s-base-url').value.trim();
@@ -766,7 +870,6 @@ function watchSettingsFields(){
     const token = S.tokenSaved ? '(saved)' : $('s-api-token').value.trim();
     if(!url || !user || !token) return;
     if(!url.startsWith('https://')) return;
-    // All fields filled — auto-test after 600ms debounce
     clearTimeout(autoTestTimer);
     autoTestTimer = setTimeout(() => {
       if(!S.testPassed) testConnection();
@@ -776,14 +879,12 @@ function watchSettingsFields(){
   ['s-base-url','s-username'].forEach(id=>{
     $(id)?.addEventListener('input',()=>{
       if($('s-base-url').value.trim()!==S.lastTestedUrl||$('s-username').value.trim()!==S.lastTestedUser) S.testPassed=false;
-      updateSaveBtn();
-      maybeAutoTest();
+      updateSaveBtn(); maybeAutoTest(); autoSavePartial();
     });
   });
   $('s-api-token')?.addEventListener('input',()=>{
     if(!S.tokenSaved){ S.testPassed=false; }
-    updateSaveBtn();
-    maybeAutoTest();
+    updateSaveBtn(); maybeAutoTest(); autoSavePartial();
   });
 }
 
@@ -946,6 +1047,10 @@ async function init(){
     $('default-icon').style.display='none';
   }
 
+  // Re-open settings if it was open when popup last closed
+  const { settingsOpen } = await chrome.storage.local.get(['settingsOpen']);
+  if(settingsOpen) { await openSettings(); return; }
+
   if(!S.baseUrl||!S.token||!S.username){showScreen('setup');return;}
 
   loadBranding(); // non-blocking
@@ -1043,6 +1148,9 @@ document.addEventListener('DOMContentLoaded',()=>{
   $('s-btn-sync').addEventListener('click',syncNow);
   $('s-btn-clear').addEventListener('click',clearCache);
   $('s-lang').addEventListener('change',e=>changeLang(e.target.value));
+  $('s-tabpersist')?.addEventListener('change', e => {
+    chrome.storage.local.set({ tabPersist: e.target.checked });
+  });
 
   // Link dialog
   $('dlg-close').addEventListener('click',closeLinkDialog);

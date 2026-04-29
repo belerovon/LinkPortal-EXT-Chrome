@@ -1,4 +1,4 @@
-/* LinkPortal Extension — popup.css v1.5.4 */
+/* LinkPortal Extension — popup.css v1.5.5 */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
@@ -311,3 +311,31 @@ mark{background:rgba(78,127,242,0.25);color:var(--accent);border-radius:2px;padd
   background:var(--bg3);padding:1px 6px;border-radius:10px;
   cursor:pointer;transition:background .12s,color .12s;border:none;font-family:var(--font)}
 .section-count:hover{background:rgba(78,127,242,0.2);color:var(--accent)}
+
+/* ── Toggle switch ── */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:2px 0;cursor:pointer;user-select:none}
+.toggle-info{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0}
+.toggle-switch{flex-shrink:0;position:relative;width:40px;height:22px}
+.toggle-switch input{position:absolute;opacity:0;width:0;height:0}
+.toggle-track{position:absolute;inset:0;background:var(--bg3);border:1px solid var(--border);
+  border-radius:11px;transition:background .2s,border-color .2s;cursor:pointer}
+.toggle-switch input:checked + .toggle-track{background:var(--accent);border-color:var(--accent)}
+.toggle-track::after{content:'';position:absolute;left:3px;top:3px;width:14px;height:14px;
+  background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.toggle-switch input:checked + .toggle-track::after{transform:translateX(18px)}
+
+/* ── Search engine widget ── */
+.search-widget{padding:8px 13px 12px}
+.search-widget-input{width:100%;padding:8px 12px;background:var(--bg3);
+  border:1px solid var(--border);border-radius:var(--r);color:var(--text);
+  font-family:var(--font);font-size:13px;outline:none;
+  transition:border-color .15s,box-shadow .15s;margin-bottom:8px}
+.search-widget-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(78,127,242,0.15)}
+.search-widget-input::placeholder{color:var(--text-dim)}
+.search-engine-btns{display:flex;gap:6px;flex-wrap:wrap}
+.search-engine-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;
+  border:1px solid var(--border);border-radius:var(--rs);background:var(--bg3);
+  color:var(--text-muted);font-family:var(--font);font-size:12px;cursor:pointer;
+  transition:all .12s;white-space:nowrap}
+.search-engine-btn:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
