@@ -1,8 +1,9 @@
 /* ═══════════════════════════════════════════════════════════
-   LinkPortal Extension — popup.js  v1.5.6
+   LinkPortal Extension — popup.js  v1.5.7
    ═══════════════════════════════════════════════════════════ */
 
-const VERSION = '1.5.6';
+const VERSION = '1.5.7';
+const ALL_TAB = 'all'; // virtual tab showing all sections
 const MAX_INACTIVE_DAYS = 30;
 
 // ── 403 Threshold: 3 failures within 5 minutes triggers logout ──
@@ -101,9 +102,12 @@ function applyLang() {
   $('s-lbl-cached').textContent    = t('lbl_cached');
   $('s-lbl-sync-now').textContent  = t('btn_sync_now');
   $('s-lbl-clear').textContent     = t('btn_clear_cache');
-  if($('s-lbl-tabpersist-title')) $('s-lbl-tabpersist-title').textContent = t('lbl_tabpersist');
-  if($('s-lbl-tabpersist-label')) $('s-lbl-tabpersist-label').textContent = t('lbl_tabpersist_label');
-  if($('s-lbl-tabpersist-hint'))  $('s-lbl-tabpersist-hint').textContent  = t('lbl_tabpersist_hint');
+  if($('s-lbl-starttab-title'))  $('s-lbl-starttab-title').textContent  = t('lbl_starttab');
+  if($('s-lbl-starttab-label'))  $('s-lbl-starttab-label').textContent  = t('lbl_starttab_label');
+  if($('s-lbl-starttab-hint'))   $('s-lbl-starttab-hint').textContent   = t('lbl_starttab_hint');
+  if($('s-starttab-last'))  $('s-starttab-last').textContent  = t('lbl_starttab_last');
+  if($('s-starttab-first')) $('s-starttab-first').textContent = t('lbl_starttab_first');
+  if($('s-starttab-all'))   $('s-starttab-all').textContent   = t('lbl_starttab_all');
   $('s-lbl-lang-title').textContent= t('lbl_lang');
   $('s-lbl-lang-sel').textContent  = t('lbl_lang_select');
   $('s-hint-lang').textContent     = t('lbl_lang_hint');
@@ -305,14 +309,20 @@ async function fetchFromApi() {
   return data;
 }
 
-function applyData(data, lastActiveTab, tabPersist=true) {
+function applyData(data, lastActiveTab, startTab='last') {
   S.tabs=data.tabs||[]; S.sections=data.sections||{};
   S.links=data.links||{}; S.perms=data.perms||{};
-  // Restore last tab only if tabPersist is enabled
-  if(tabPersist && lastActiveTab && S.tabs.find(t2=>t2.id===lastActiveTab))
-    S.activeTab = lastActiveTab;
-  else if(!S.activeTab || !S.tabs.find(t2=>t2.id===S.activeTab) || !tabPersist)
+  // startTab: 'last' = restore last, 'first' = always first, 'all' = virtual all-tab
+  if(startTab === 'all') {
+    S.activeTab = ALL_TAB;
+  } else if(startTab === 'last' && lastActiveTab) {
+    if(lastActiveTab === ALL_TAB) S.activeTab = ALL_TAB;
+    else if(S.tabs.find(t2=>t2.id===lastActiveTab)) S.activeTab = lastActiveTab;
+    else S.activeTab = S.tabs[0]?.id || null;
+  } else {
+    // 'first' or no match
     S.activeTab = S.tabs[0]?.id || null;
+  }
   // Build flat link list with precomputed search string
   S.allLinks=[];
   for(const tab of S.tabs)
@@ -334,20 +344,24 @@ async function loadData(force=false) {
   }
   try {
     if(!force){
-      const {cache, lastActiveTab, tabPersist}=await chrome.storage.local.get(['cache','lastActiveTab','tabPersist']);
+      const {cache, lastActiveTab, startTab}=await chrome.storage.local.get(['cache','lastActiveTab','startTab']);
       if(cache){
-        applyData(cache, lastActiveTab, tabPersist!==false); renderAll(); showScreen('main');
+        applyData(cache, lastActiveTab, startTab||'last'); renderAll(); showScreen('main');
+        setTimeout(() => $('search-input')?.focus(), 50);
         $('cache-badge').style.display='';
         $('cache-badge').title=t('cache_from')+' '+new Date(cache.syncTime).toLocaleString();
         bgRefresh(); return;
       }
     }
-    const {lastActiveTab, tabPersist}=await chrome.storage.local.get(['lastActiveTab','tabPersist']);
-    applyData(await fetchFromApi(), lastActiveTab, tabPersist!==false); clear403(); renderAll(); showScreen('main');
+    const {lastActiveTab, startTab}=await chrome.storage.local.get(['lastActiveTab','startTab']);
+    applyData(await fetchFromApi(), lastActiveTab, startTab||'last'); clear403(); renderAll(); showScreen('main');
+    // Auto-focus search immediately
+    setTimeout(() => $('search-input')?.focus(), 50);
   } catch(err) {
     if(err.status===403){if(await record403())await doLogout('403');else{$('error-message').textContent=t('test_err_403');showScreen('error');}return;}
     const {cache}=await chrome.storage.local.get(['cache']);
-    if(cache){applyData(cache, S.activeTab);renderAll();showScreen('main');
+    const {startTab:stFb}=await chrome.storage.local.get(['startTab']);
+    if(cache){applyData(cache, S.activeTab, stFb||'last');renderAll();showScreen('main');
       $('cache-badge').style.display='';
       $('cache-badge').title=t('cache_offline')+' '+new Date(cache.syncTime).toLocaleString();}
     else{$('error-message').textContent=err.message;showScreen('error');}
@@ -380,8 +394,8 @@ async function syncLangFromPortal() {
 
 async function bgRefresh() {
   try{
-    const {lastActiveTab}=await chrome.storage.local.get(['lastActiveTab']);
-    applyData(await fetchFromApi(), lastActiveTab);
+    const {lastActiveTab, startTab}=await chrome.storage.local.get(['lastActiveTab','startTab']);
+    applyData(await fetchFromApi(), lastActiveTab, startTab||'last');
     clear403();
     $('cache-badge').style.display='none';
     renderAll();
@@ -399,17 +413,21 @@ function renderAll() {
     return;
   }
   $('tabs-bar').style.display='';
+  if(!S.activeTab) S.activeTab = S.tabs[0]?.id || null;
   renderTabBar(); renderTabContent(S.activeTab);
 }
 
 // ── Tab bar: hamburger toggle ──
 function renderTabBar() {
-  const activeTab = S.tabs.find(t2=>t2.id===S.activeTab);
   const label = $('active-tab-label');
-  label.textContent = (activeTab?.icon ? activeTab.icon+' ' : '') + (activeTab?.title||'');
-
-  // Add-link: show if user can_create in any link-type section
-  const canAdd = S.tabs.some(tab => {
+  if(S.activeTab === ALL_TAB) {
+    label.textContent = t('tab_all_label');
+  } else {
+    const activeTab = S.tabs.find(t2=>t2.id===S.activeTab);
+    label.textContent = (activeTab?.icon ? activeTab.icon+' ' : '') + (activeTab?.title||'');
+  }
+  // Add-link: hide on ALL_TAB (ambiguous which tab to add to)
+  const canAdd = S.activeTab !== ALL_TAB && S.tabs.some(tab => {
     const tp = S.perms[tab.id]||{};
     return (S.sections[tab.id]||[]).some(sec => {
       if(sec.section_type && sec.section_type !== 'links') return false;
@@ -422,30 +440,33 @@ function renderTabBar() {
   addBtn.textContent = t('btn_add_link');
 }
 
+function switchTab(tabId) {
+  if(_dnd) { _dnd.item.classList.remove('dragging'); _dnd.item.style.visibility=''; _dnd.line.remove(); _dnd=null; }
+  S.activeTab = tabId;
+  chrome.storage.local.set({ lastActiveTab: tabId });
+  clearSearch(); renderTabBar(); renderTabContent(S.activeTab);
+}
+
 function openTabsDropdown() {
   const dropdown = $('tabs-dropdown');
   const chevron  = $('tabs-chevron');
   if(dropdown.style.display !== 'none') {
     dropdown.style.display = 'none'; chevron.classList.remove('open'); return;
   }
-  dropdown.innerHTML = S.tabs.map(tab =>
+  // "Alle Sektionen" virtual tab at top
+  const allItem = '<button class="tab-drop-item'+(S.activeTab===ALL_TAB?' active':'')+'" data-id="'+ALL_TAB+'">'+
+    '<span class="tab-drop-icon">≡</span><span>'+esc(t('lbl_starttab_all'))+'</span></button>';
+  dropdown.innerHTML = allItem + S.tabs.map(tab =>
     '<button class="tab-drop-item'+(tab.id===S.activeTab?' active':'')+'" data-id="'+tab.id+'">'+
     (tab.icon?'<span class="tab-drop-icon">'+tab.icon+'</span>':'')+
     '<span>'+esc(tab.title)+'</span></button>'
   ).join('');
   dropdown.querySelectorAll('.tab-drop-item').forEach(btn => {
     btn.addEventListener('click', () => {
-      // Cancel any in-progress DnD before switching tab
-      if(_dnd) {
-        _dnd.item.classList.remove('dragging');
-        _dnd.item.style.visibility = '';
-        _dnd.line.remove();
-        _dnd = null;
-      }
-      S.activeTab = parseInt(btn.dataset.id);
-      chrome.storage.local.set({ lastActiveTab: S.activeTab });
+      const rawId = btn.dataset.id;
+      const tabId = rawId === ALL_TAB ? ALL_TAB : parseInt(rawId);
       dropdown.style.display = 'none'; chevron.classList.remove('open');
-      clearSearch(); renderTabBar(); renderTabContent(S.activeTab);
+      switchTab(tabId);
     });
   });
   dropdown.style.display = ''; chevron.classList.add('open');
@@ -498,8 +519,63 @@ function renderSearchSection(sec) {
     + '</div></div>';
 }
 
+// ── Render ALL SECTIONS virtual tab ──
+function renderAllSections() {
+  const content = $('tab-content');
+  let html = '', has = false;
+  for(const tab of S.tabs) {
+    const secs = S.sections[tab.id]||[];
+    const tabPerm = S.perms[tab.id]||{};
+    for(const sec of secs) {
+      const st = sec.section_type || 'links';
+      if(st !== 'links' && st !== 'search' && st !== 'tasks' && st !== 'translate') continue;
+      if(st === 'links' && !(S.links[sec.id]||[]).length) continue;
+      if(has) html += '<div class="section-divider"></div>';
+      has = true;
+      // Tab label above first section of each tab
+      const sp = sec.sec_perms || sec.perms || null;
+      const canEdit = sp ? (sp.can_edit||false) : (tabPerm.can_edit||false);
+      const canDel  = sp ? (sp.can_delete||false) : (tabPerm.can_delete||false);
+      if(st === 'search')    { html += renderSearchSection(sec); continue; }
+      if(st === 'tasks')     { html += renderTasksSection(sec); continue; }
+      if(st === 'translate') { html += renderTranslateSection(sec); continue; }
+      const lnks = S.links[sec.id]||[];
+      html += '<div class="section-block" data-sec-id="'+sec.id+'"><div class="section-header">'
+        + (sec.icon?'<span class="section-icon">'+sec.icon+'</span>':'')
+        + '<span class="section-title">'+esc(sec.title)+'</span>'
+        + '<span class="all-tab-label">'+esc(tab.title)+'</span>'
+        + '<button class="section-count" data-sec-id="'+sec.id+'" title="'+t('open_all_links')+'">'+lnks.length+'</button>'
+        + '</div>'
+        + lnks.map(l=>linkHtml({...l, sectionId:sec.id}, canEdit, canDel)).join('')
+        + '</div>';
+    }
+  }
+  content.innerHTML = has ? html : '<div class="empty-tab"><div class="empty-icon">📭</div><p>'+t('no_links')+'</p></div>';
+  bindLinks(content, null);
+  content.querySelectorAll('.section-count[data-sec-id]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      (S.links[parseInt(btn.dataset.secId)]||[]).forEach(l => chrome.tabs.create({url:l.url,active:false}));
+    });
+  });
+  content.querySelectorAll('.tasks-section-widget').forEach(w => loadTasksInto(w, parseInt(w.dataset.secId)));
+  content.querySelectorAll('.translate-section-widget').forEach(w => wireTranslateWidget(w));
+  content.querySelectorAll('.search-section-widget').forEach(widget => {
+    const input = widget.querySelector('.search-widget-input');
+    widget.querySelectorAll('.search-engine-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const q = input.value.trim(); if(!q){ input.focus(); return; }
+        chrome.tabs.create({url: btn.dataset.url.replace('{q}', encodeURIComponent(q)), active:true});
+      });
+    });
+    input.addEventListener('keydown', e => { if(e.key==='Enter'){ const f=widget.querySelector('.search-engine-btn'); if(f)f.click(); } });
+  });
+}
+
 // ── Render tab content ──
 function renderTabContent(tabId) {
+  // Virtual "All Sections" tab
+  if(tabId === ALL_TAB) { renderAllSections(); return; }
   const content = $('tab-content');
   const secs = S.sections[tabId]||[];
   const tabPerm = S.perms[tabId]||{};
@@ -846,11 +922,27 @@ function initGlobalDnD() {
 }
 
 // ── Search ──
+// ── Search keyboard navigation ──
+let searchKbdIdx = -1;
+function kbdSelectResult(idx) {
+  const items = $('results-list')?.querySelectorAll('.link-item') || [];
+  if(!items.length) return;
+  // Clamp
+  if(idx < 0) idx = items.length - 1;
+  if(idx >= items.length) idx = 0;
+  // Remove old selection
+  items.forEach(el => el.classList.remove('kbd-selected'));
+  items[idx].classList.add('kbd-selected');
+  items[idx].scrollIntoView({block:'nearest'});
+  searchKbdIdx = idx;
+}
+
 function performSearch(q) {
   q=q.trim().toLowerCase();
   const sr=$('search-results'),tc=$('tab-content'),tb=$('tabs-bar');
   if(!q){sr.style.display='none';tc.style.display='';tb.style.display='';return;}
   tc.style.display='none';tb.style.display='none';sr.style.display='';
+  searchKbdIdx = -1; // reset keyboard selection on new query
   const m=S.allLinks.filter(l=>l._search.includes(q));
   const cnt=m.length;
   $('results-header').textContent=cnt+' '+(cnt===1?t('results_suffix_one'):t('results_suffix_many'));
@@ -943,7 +1035,7 @@ async function saveLinkDialog() {
     if(isEdit) await apiPut('/links/'+linkId,body);
     else await apiPost('/sections/'+secId+'/links',body);
     closeLinkDialog();
-    applyData(await fetchFromApi(), S.activeTab);
+    applyData(await fetchFromApi(), S.activeTab, 'last'); // preserve active tab on CRUD
     renderAll();
   } catch(err){showDlgErr(err.message);}
   finally{$('dlg-save').disabled=false;}
@@ -953,7 +1045,7 @@ async function deleteLink(linkId, tabId) {
   if(!confirm(t('confirm_delete_link'))) return;
   try {
     await apiDel('/links/'+linkId);
-    applyData(await fetchFromApi(), S.activeTab);
+    applyData(await fetchFromApi(), S.activeTab, 'last'); // preserve active tab on CRUD
     renderAll();
   } catch(err){alert(err.message);}
 }
@@ -984,9 +1076,9 @@ async function openSettings() {
     $('s-btn-edit-tok').style.display='none'; $('s-btn-show-tok').style.display='';
   }
   $('s-lang').value=_lang;
-  // Load tab persistence setting
-  const { tabPersist } = await chrome.storage.local.get(['tabPersist']);
-  if($('s-tabpersist')) $('s-tabpersist').checked = tabPersist !== false; // default ON
+  // Load start tab setting
+  const { startTab } = await chrome.storage.local.get(['startTab']);
+  if($('s-starttab')) $('s-starttab').value = startTab || 'last';
   updateSaveBtn(); loadCacheInfo();
   showScreen('settings');
 }
@@ -1138,7 +1230,7 @@ async function syncNow(){
   showSResult($('s-sync-result'),'loading',t('sync_loading'));
   try {
     // Use fetchFromApi directly (same as refresh button) — avoids message passing issues
-    applyData(await fetchFromApi(), S.activeTab);
+    applyData(await fetchFromApi(), S.activeTab, 'last'); // preserve active tab on CRUD
     renderAll();
     await loadCacheInfo();
     showSResult($('s-sync-result'),'success',t('sync_ok')+' '+new Date().toLocaleTimeString());
@@ -1282,7 +1374,18 @@ document.addEventListener('DOMContentLoaded',()=>{
   const si=$('search-input'),sc=$('search-clear');let tm;
   si.addEventListener('input',()=>{sc.style.display=si.value?'':'none';clearTimeout(tm);tm=setTimeout(()=>performSearch(si.value),200);});
   sc.addEventListener('click',clearSearch);
-  si.addEventListener('keydown',e=>{if(e.key==='Escape')clearSearch();});
+  si.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){clearSearch();return;}
+    if($('search-results').style.display==='none') return;
+    if(e.key==='ArrowDown'){e.preventDefault();kbdSelectResult(searchKbdIdx+1);return;}
+    if(e.key==='ArrowUp')  {e.preventDefault();kbdSelectResult(searchKbdIdx-1);return;}
+    if(e.key==='Enter'){
+      e.preventDefault();
+      const items=$('results-list')?.querySelectorAll('.link-item');
+      if(items&&searchKbdIdx>=0&&items[searchKbdIdx]) chrome.tabs.create({url:items[searchKbdIdx].dataset.url});
+      else if(items&&items.length===1) chrome.tabs.create({url:items[0].dataset.url});
+    }
+  });
 
   // Settings panel
   $('btn-settings-back').addEventListener('click',closeSettings);
@@ -1312,8 +1415,8 @@ document.addEventListener('DOMContentLoaded',()=>{
   $('s-btn-sync').addEventListener('click',syncNow);
   $('s-btn-clear').addEventListener('click',clearCache);
   $('s-lang').addEventListener('change',e=>changeLang(e.target.value));
-  $('s-tabpersist')?.addEventListener('change', e => {
-    chrome.storage.local.set({ tabPersist: e.target.checked });
+  $('s-starttab')?.addEventListener('change', e => {
+    chrome.storage.local.set({ startTab: e.target.value });
   });
 
   // Link dialog

@@ -1,5 +1,5 @@
 /* ════════════════════════════════════════════════════
-   LinkPortal Extension — background.js  v1.5.6
+   LinkPortal Extension — background.js  v1.5.7
    Basic Auth · Periodic Sync · 30-day Logout
    ════════════════════════════════════════════════════ */
 

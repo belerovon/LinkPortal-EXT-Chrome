@@ -1,4 +1,4 @@
-/* LinkPortal Extension — popup.css v1.5.6 */
+/* LinkPortal Extension — popup.css v1.5.7 */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
@@ -379,3 +379,12 @@ mark{background:rgba(78,127,242,0.25);color:var(--accent);border-radius:2px;padd
   transition:border-color .15s}
 .tr-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(78,127,242,0.12)}
 .tr-input::placeholder{color:var(--text-dim)}
+
+/* ── Keyboard-selected search result ── */
+.link-item.kbd-selected{background:rgba(78,127,242,0.12);border-left-color:var(--accent)}
+.link-item.kbd-selected .link-title{color:var(--accent)}
+
+/* ── All-sections tab label (shows which tab a section belongs to) ── */
+.all-tab-label{font-size:9.5px;font-weight:600;color:var(--accent);background:rgba(78,127,242,0.12);
+  padding:1px 6px;border-radius:8px;margin-left:auto;white-space:nowrap;flex-shrink:0}
+.all-tab-label+.section-count{margin-left:6px}

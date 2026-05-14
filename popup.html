@@ -42,7 +42,7 @@
             <option value="en">🇬🇧 English</option>
             <option value="es">🇪🇸 Español</option>
           </select>
-          <span class="dd-version" id="dd-version">v1.5.6</span>
+          <span class="dd-version" id="dd-version">v1.5.7</span>
         </div>
       </div>
     </div>
@@ -208,17 +208,16 @@
       </div>
 
       <div class="card">
-        <div class="card-title" id="s-lbl-tabpersist-title"></div>
-        <label class="toggle-row">
-          <div class="toggle-info">
-            <span class="label" id="s-lbl-tabpersist-label"></span>
-            <span class="field-hint" id="s-lbl-tabpersist-hint"></span>
-          </div>
-          <div class="toggle-switch">
-            <input type="checkbox" id="s-tabpersist" role="switch">
-            <span class="toggle-track"></span>
-          </div>
-        </label>
+        <div class="card-title" id="s-lbl-starttab-title"></div>
+        <div class="field">
+          <label class="label" id="s-lbl-starttab-label" for="s-starttab"></label>
+          <select id="s-starttab" class="input input-select">
+            <option value="last" id="s-starttab-last"></option>
+            <option value="first" id="s-starttab-first"></option>
+            <option value="all" id="s-starttab-all"></option>
+          </select>
+          <span class="field-hint" id="s-lbl-starttab-hint"></span>
+        </div>
       </div>
 
       <div class="card">
@@ -244,7 +243,7 @@
     </footer>
     <!-- Version + collapsible Extension ID below footer -->
     <div class="settings-version-bar">
-      <button id="s-version-btn" class="settings-version-btn">v1.5.6</button>
+      <button id="s-version-btn" class="settings-version-btn">v1.5.7</button>
       <div id="s-extid-collapse" class="extid-collapse" style="display:none">
         <div class="ext-id-row">
           <code id="s-ext-id" class="ext-id-code">…</code>
