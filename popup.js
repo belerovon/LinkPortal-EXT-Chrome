@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════
-   LinkPortal Extension — popup.js  v1.5.7
+   LinkPortal Extension — popup.js  v1.5.8
    ═══════════════════════════════════════════════════════════ */
 
-const VERSION = '1.5.7';
+const VERSION = '1.5.8';
 const ALL_TAB = 'all'; // virtual tab showing all sections
 const MAX_INACTIVE_DAYS = 30;
 
@@ -166,21 +166,6 @@ const apiPut  = (p,b)=> apiFetch('PUT',p,b);
 const apiDel  = p    => apiFetch('DELETE',p);
 
 // ── Branding: logo (cached) + title ──
-// Uses URL.createObjectURL — simpler and no FileReader memory overhead
-async function blobToDataUrl(blob) {
-  const url = URL.createObjectURL(blob);
-  return new Promise((res, rej) => {
-    const img = new Image();
-    const canvas = document.createElement('canvas');
-    img.onload = () => {
-      URL.revokeObjectURL(url); // free memory immediately
-      res({ img, objectUrl: null });
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); rej(); };
-    img.src = url;
-  }).catch(() => null);
-}
-
 async function setLogoDisplay(src) {
   $('portal-logo').src = src;
   $('portal-logo').style.display = '';
@@ -214,15 +199,12 @@ async function loadBranding() {
       const r = await fetch(base+path, {mode:'cors'});
       if(!r.ok) continue;
       const blob = await r.blob();
-      const objUrl = URL.createObjectURL(blob);
       displayDataUrl = await new Promise(res => {
-        // Use FileReader only for persistent storage (data: URL needed)
         const rd = new FileReader();
         rd.onload = e => res(e.target.result);
         rd.onerror = () => res(null);
         rd.readAsDataURL(blob);
       });
-      URL.revokeObjectURL(objUrl);
       if(displayDataUrl) {
         setLogoDisplay(displayDataUrl);
         await chrome.storage.local.set({ logoDisplayUrl: displayDataUrl });
@@ -297,8 +279,10 @@ async function fetchFromApi() {
     perms[tab.id] = tab.perms || {can_read:true,can_edit:false,can_delete:false};
     const secs = await apiGet('/tabs/'+tab.id+'/sections');
     sections[tab.id] = secs;
-    // Fetch all sections in parallel within each tab
+    // Only fetch links for 'links' type sections — skip tasks/search/translate
     await Promise.all(secs.map(async sec => {
+      const st = sec.section_type || 'links';
+      if(st !== 'links') { links[sec.id] = []; return; }
       try { links[sec.id] = await apiGet('/sections/'+sec.id+'/links'); }
       catch(e) { if(e.status===403) throw e; links[sec.id]=[]; }
     }));
@@ -519,6 +503,27 @@ function renderSearchSection(sec) {
     + '</div></div>';
 }
 
+// ── Wire interactive widgets (search/tasks/translate) in a container ──
+function wireWidgets(container) {
+  container.querySelectorAll('.search-section-widget').forEach(widget => {
+    const input = widget.querySelector('.search-widget-input');
+    widget.querySelectorAll('.search-engine-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const q = input.value.trim();
+        if(!q) { input.focus(); return; }
+        chrome.tabs.create({url: btn.dataset.url.replace('{q}', encodeURIComponent(q)), active:true});
+      });
+    });
+    input.addEventListener('keydown', e => {
+      if(e.key === 'Enter') { const f = widget.querySelector('.search-engine-btn'); if(f) f.click(); }
+    });
+  });
+  container.querySelectorAll('.tasks-section-widget').forEach(w =>
+    loadTasksInto(w, parseInt(w.dataset.secId)));
+  container.querySelectorAll('.translate-section-widget').forEach(w =>
+    wireTranslateWidget(w));
+}
+
 // ── Render ALL SECTIONS virtual tab ──
 function renderAllSections() {
   const content = $('tab-content');
@@ -558,18 +563,7 @@ function renderAllSections() {
       (S.links[parseInt(btn.dataset.secId)]||[]).forEach(l => chrome.tabs.create({url:l.url,active:false}));
     });
   });
-  content.querySelectorAll('.tasks-section-widget').forEach(w => loadTasksInto(w, parseInt(w.dataset.secId)));
-  content.querySelectorAll('.translate-section-widget').forEach(w => wireTranslateWidget(w));
-  content.querySelectorAll('.search-section-widget').forEach(widget => {
-    const input = widget.querySelector('.search-widget-input');
-    widget.querySelectorAll('.search-engine-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const q = input.value.trim(); if(!q){ input.focus(); return; }
-        chrome.tabs.create({url: btn.dataset.url.replace('{q}', encodeURIComponent(q)), active:true});
-      });
-    });
-    input.addEventListener('keydown', e => { if(e.key==='Enter'){ const f=widget.querySelector('.search-engine-btn'); if(f)f.click(); } });
-  });
+  wireWidgets(content);
 }
 
 // ── Render tab content ──
@@ -582,41 +576,33 @@ function renderTabContent(tabId) {
   const tabEdit = tabPerm.can_edit||false;
   const tabDel  = tabPerm.can_delete||false;
   let html='', has=false;
-  for(let i=0;i<secs.length;i++){
-    const sec=secs[i];
+  for(const sec of secs){
     const st = sec.section_type || 'links';
     // Only render 'links', 'search', 'tasks', 'translate' types
     if(st !== 'links' && st !== 'search' && st !== 'tasks' && st !== 'translate') continue;
 
     if(st === 'search') {
-      has=true;
-      if(i>0) html+='<div class="section-divider"></div>';
-      html += renderSearchSection(sec);
-      continue;
+      if(has) html+='<div class="section-divider"></div>'; has=true;
+      html += renderSearchSection(sec); continue;
     }
 
     if(st === 'tasks') {
-      has=true;
-      if(i>0) html+='<div class="section-divider"></div>';
-      html += renderTasksSection(sec);
-      continue;
+      if(has) html+='<div class="section-divider"></div>'; has=true;
+      html += renderTasksSection(sec); continue;
     }
 
     if(st === 'translate') {
-      has=true;
-      if(i>0) html+='<div class="section-divider"></div>';
-      html += renderTranslateSection(sec);
-      continue;
+      if(has) html+='<div class="section-divider"></div>'; has=true;
+      html += renderTranslateSection(sec); continue;
     }
 
     // links section
     const lnks=S.links[sec.id]||[];
     if(!lnks.length) continue;
-    has=true;
     const sp = sec.sec_perms || sec.perms || null;
     const canEdit   = sp ? (sp.can_edit  ||false) : tabEdit;
     const canDel    = sp ? (sp.can_delete||false) : tabDel;
-    if(i>0) html+='<div class="section-divider"></div>';
+    if(has) html+='<div class="section-divider"></div>'; has=true;
     html+='<div class="section-block" data-sec-id="'+sec.id+'"><div class="section-header">'+
       (sec.icon?'<span class="section-icon">'+sec.icon+'</span>':'')+
       '<span class="section-title">'+esc(sec.title)+'</span>'+
@@ -636,36 +622,7 @@ function renderTabContent(tabId) {
     });
   });
 
-  // Wire up search engine widgets
-  content.querySelectorAll('.search-section-widget').forEach(widget => {
-    const input = widget.querySelector('.search-widget-input');
-    widget.querySelectorAll('.search-engine-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const q = input.value.trim();
-        if(!q) { input.focus(); return; }
-        const url = btn.dataset.url.replace('{q}', encodeURIComponent(q));
-        chrome.tabs.create({url, active:true});
-      });
-    });
-    input.addEventListener('keydown', e => {
-      if(e.key === 'Enter') {
-        const first = widget.querySelector('.search-engine-btn');
-        if(first) first.click();
-      }
-    });
-  });
-
-  // Wire up tasks sections — load live from API
-  content.querySelectorAll('.tasks-section-widget').forEach(widget => {
-    const secId = parseInt(widget.dataset.secId);
-    loadTasksInto(widget, secId);
-  });
-
-  // Wire up translate sections
-  content.querySelectorAll('.translate-section-widget').forEach(widget => {
-    const secId = parseInt(widget.dataset.secId);
-    wireTranslateWidget(widget, secId);
-  });
+  wireWidgets(content); // search, tasks, translate
 }
 
 // ── Tasks section ──
@@ -683,9 +640,10 @@ async function loadTasksInto(widget, secId) {
   const body = widget.querySelector('.tasks-body');
   // Check if user can edit (for add + toggle)
   const sec = Object.values(S.sections).flat().find(s => s.id === secId);
-  const tabId = Object.entries(S.sections).find(([,secs]) => secs.some(s=>s.id===secId))?.[0];
+  const tabIdStr = Object.entries(S.sections).find(([,secs]) => secs.some(s=>s.id===secId))?.[0];
+  const tabId = tabIdStr ? parseInt(tabIdStr) : null;
   const sp  = sec ? (sec.sec_perms || sec.perms || null) : null;
-  const tp  = S.perms[tabId] || {};
+  const tp  = tabId ? (S.perms[tabId] || {}) : {};
   const canEdit = sp ? (sp.can_edit||false) : (tp.can_edit||false);
 
   try {
@@ -784,11 +742,9 @@ function wireTranslateWidget(widget) {
   };
 
   swapBtn.addEventListener('click', () => {
-    const fromVal = fromSel.value === 'auto' ? 'de' : fromSel.value;
+    const fromVal = fromSel.value;
     const toVal   = toSel.value;
-    // Swap values (auto stays as from only)
-    const prev = fromSel.value;
-    fromSel.value = toVal;
+    fromSel.value = toVal === 'auto' ? 'de' : toVal;
     toSel.value   = fromVal === 'auto' ? 'de' : fromVal;
   });
 
